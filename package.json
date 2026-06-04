@@ -1,0 +1,15 @@
+{
+  "name": "pi-provider-newapi",
+  "version": "0.1.0",
+  "description": "pi provider extension for self-hosted NewAPI AI gateway — dynamic model discovery with cost calculation from ratio_config",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi", "extension", "provider", "newapi", "ai-gateway"],
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  }
+}
