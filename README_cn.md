@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![pi extension](https://img.shields.io/badge/extension-pi%20provider-green.svg)](https://github.com/ttimasdf/pi-provider-newapi)
 
-pi 的自托管 [NewAPI](https://github.com/QuantumNous/new-api) AI 网关 provider 扩展。
+[pi](https://github.com/earendil-works/pi) coding agent 的自托管 [NewAPI](https://github.com/QuantumNous/new-api) AI 网关 provider 扩展。
 
 注册一个 `newapi` provider，支持动态模型发现、自动费用计算，并根据模型 ID 前缀自动路由到对应后端：
 
@@ -16,13 +16,19 @@ pi 的自托管 [NewAPI](https://github.com/QuantumNous/new-api) AI 网关 provi
 
 ## 安装
 
-本扩展是 [pi](https://github.com/earendil-works/pi-coding-agent) 的 provider 扩展，没有额外的运行时依赖，仅需 pi 本身作为 peer 依赖。
+本扩展是 [pi](https://github.com/earendil-works/pi) coding agent 的 provider 扩展，没有额外的运行时依赖，仅需 pi 本身作为 peer 依赖。
 
 ```bash
-pnpm add pi-provider-newapi
+pi install npm:pi-provider-newapi
 ```
 
-安装后 pi 会自动发现 `package.json` 中 `pi.extensions` 字段声明的扩展，无需额外配置。
+或从 git 安装：
+
+```bash
+pi install git:github.com/ttimasdf/pi-provider-newapi
+```
+
+扩展通过 `package.json` 中的 `pi.extensions` 字段自动发现——安装后无需额外配置。
 
 ## 快速开始
 

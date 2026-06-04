@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![pi extension](https://img.shields.io/badge/extension-pi%20provider-green.svg)](https://github.com/ttimasdf/pi-provider-newapi)
 
-pi provider extension for self-hosted [NewAPI](https://github.com/QuantumNous/new-api) AI gateways.
+[pi](https://github.com/earendil-works/pi) coding agent provider extension for self-hosted [NewAPI](https://github.com/QuantumNous/new-api) AI gateways.
 
 Registers a single `newapi` provider with dynamic model discovery, automatic cost calculation, and backend routing based on model ID prefix:
 
@@ -16,13 +16,19 @@ Registers a single `newapi` provider with dynamic model discovery, automatic cos
 
 ## Installation
 
-This is a [pi](https://github.com/earendil-works/pi-coding-agent) provider extension. It has no runtime dependencies — only peer dependencies on pi itself.
+This is a [pi](https://github.com/earendil-works/pi) coding agent provider extension. It has no runtime dependencies — only peer dependencies on pi itself.
 
 ```bash
-pnpm add pi-provider-newapi
+pi install npm:pi-provider-newapi
 ```
 
-Then ensure pi loads the extension. pi auto-discovers extensions listed in the `pi.extensions` field of `package.json`, so no extra configuration is needed after install.
+Or install from git:
+
+```bash
+pi install git:github.com/ttimasdf/pi-provider-newapi
+```
+
+The extension is auto-discovered via the `pi.extensions` field in `package.json` — no extra configuration is needed after install.
 
 ## Quick Start
 
