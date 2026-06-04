@@ -180,6 +180,11 @@ function findRatio(modelId: string, ratios: Record<string, number>): number | un
 // Earlier providers take precedence over later ones.
 // ---------------------------------------------------------------------------
 
+interface ModelLookupItem {
+	model: Model<Api>;
+	source: string;
+}
+
 interface EnrichedModel {
 	id: string;
 	name: string;
@@ -191,10 +196,11 @@ interface EnrichedModel {
 	maxTokens: number;
 	isOpenAI: boolean;
 	compat?: Model<Api>["compat"];
+	enrichedFrom?: string;
 }
 
-function buildEnrichmentLookup(): Map<string, Model<Api>> {
-	const lookup = new Map<string, Model<Api>>();
+function buildEnrichmentLookup(): Map<string, ModelLookupItem> {
+	const lookup = new Map<string, ModelLookupItem>();
 
 	for (const provider of ENRICHMENT_PROVIDERS) {
 		let providerModels: Model<Api>[];
@@ -208,7 +214,7 @@ function buildEnrichmentLookup(): Map<string, Model<Api>> {
 			const stripped = m.id.includes("/") ? m.id.slice(m.id.indexOf("/") + 1) : m.id;
 			const normalizedId = stripped.replaceAll(".", "-").toLowerCase();
 			if (!lookup.has(normalizedId)) {
-				lookup.set(normalizedId, m);
+				lookup.set(normalizedId, { model: m, source: provider });
 			}
 		}
 	}
@@ -337,33 +343,33 @@ export default async function (pi: ExtensionAPI) {
 					if (config.modelInfo[m.id]) {
 						const mi = config.modelInfo[m.id];
 						const diffs: string[] = [];
-						if (mi.reasoning !== enriched.reasoning) {
-							diffs.push(`reasoning ${mi.reasoning} → ${enriched.reasoning}`);
+						if (mi.reasoning !== enriched.model.reasoning) {
+							diffs.push(`reasoning ${mi.reasoning} → ${enriched.model.reasoning}`);
 						}
-						if (JSON.stringify(mi.input ?? ["text"]) !== JSON.stringify(enriched.input)) {
-							diffs.push(`input ${JSON.stringify(mi.input ?? ["text"])} → ${JSON.stringify(enriched.input)}`);
+						if (JSON.stringify(mi.input ?? ["text"]) !== JSON.stringify(enriched.model.input)) {
+							diffs.push(`input ${JSON.stringify(mi.input ?? ["text"])} → ${JSON.stringify(enriched.model.input)}`);
 						}
-						if (mi.contextWindow !== enriched.contextWindow) {
-							diffs.push(`contextWindow ${mi.contextWindow} → ${enriched.contextWindow}`);
+						if (mi.contextWindow !== enriched.model.contextWindow) {
+							diffs.push(`contextWindow ${mi.contextWindow} → ${enriched.model.contextWindow}`);
 						}
-						if (mi.maxTokens !== enriched.maxTokens) {
-							diffs.push(`maxTokens ${mi.maxTokens} → ${enriched.maxTokens}`);
+						if (mi.maxTokens !== enriched.model.maxTokens) {
+							diffs.push(`maxTokens ${mi.maxTokens} → ${enriched.model.maxTokens}`);
 						}
-						if (JSON.stringify(mi.thinkingLevelMap) !== JSON.stringify(enriched.thinkingLevelMap)) {
-							diffs.push(`thinkingLevelMap ${JSON.stringify(mi.thinkingLevelMap)} → ${JSON.stringify(enriched.thinkingLevelMap)}`);
+						if (JSON.stringify(mi.thinkingLevelMap) !== JSON.stringify(enriched.model.thinkingLevelMap)) {
+							diffs.push(`thinkingLevelMap ${JSON.stringify(mi.thinkingLevelMap)} → ${JSON.stringify(enriched.model.thinkingLevelMap)}`);
 						}
 						const diffStr = diffs.length > 0 ? diffs.join(", ") : "none";
 						console.warn(
-							`NewAPI: model "${m.id}" now found in known models — using upstream values (config removed). Differences: ${diffStr}`,
+							`NewAPI: model "${m.id}" now found in known models (from ${enriched.source}) — using upstream values (config removed). Differences: ${diffStr}`,
 						);
 						delete config.modelInfo[m.id];
 						configDirty = true;
 					}
-					reasoning = enriched.reasoning;
-					thinkingLevelMap = enriched.thinkingLevelMap;
-					input = enriched.input;
-					contextWindow = enriched.contextWindow;
-					maxTokens = enriched.maxTokens;
+					reasoning = enriched.model.reasoning;
+					thinkingLevelMap = enriched.model.thinkingLevelMap;
+					input = enriched.model.input;
+					contextWindow = enriched.model.contextWindow;
+					maxTokens = enriched.model.maxTokens;
 				} else {
 					if (!config.modelInfo[m.id]) {
 						config.modelInfo[m.id] = {
@@ -393,7 +399,7 @@ export default async function (pi: ExtensionAPI) {
 
 				modelConfigMap.set(m.id, {
 					id: m.id,
-					name: enriched?.name ?? m.id,
+					name: enriched?.model.name ?? m.id,
 					reasoning,
 					thinkingLevelMap,
 					input,
@@ -406,7 +412,8 @@ export default async function (pi: ExtensionAPI) {
 					contextWindow,
 					maxTokens,
 					isOpenAI,
-					compat: enriched?.compat,
+					compat: enriched?.model.compat,
+					enrichedFrom: enriched?.source,
 				});
 			}
 
@@ -511,6 +518,7 @@ export default async function (pi: ExtensionAPI) {
 		contextWindow: m.contextWindow,
 		maxTokens: m.maxTokens,
 		compat: m.compat,
+		enrichedFrom: m.enrichedFrom,
 	}));
 
 	if (resolvedBaseUrl === UNCONFIGURED_URL || providerModels.length === 0) {
