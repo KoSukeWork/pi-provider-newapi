@@ -12,7 +12,7 @@ Registers a single `newapi` provider with dynamic model discovery, automatic cos
 | `gpt-`, `o1`, `o3`, `o4` | OpenAI Responses | `{baseUrl}/v1` |
 | everything else | Anthropic Messages | `{baseUrl}` |
 
-**[中文文档](README_cn.md)**
+**[中文文档](https://github.com/ttimasdf/pi-provider-newapi/blob/main/README_cn.md)**
 
 ## Installation
 
