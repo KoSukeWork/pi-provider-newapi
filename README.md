@@ -24,15 +24,14 @@ The provider registers automatically on startup with discovered models.
 
 ```
 pi> source .env          # sets NEWAPI_BASE_URL in dev
-pi> /login newapi
-Enter API key: sk-your-api-key
+pi> /login
 ```
 
-The key is saved to `<agentDir>/auth.json` by pi's built-in credential store. On next load, the extension reads it automatically.
+Run `/login` in the pi session. pi will interactively prompt for the provider, and for the API key (`sk-your-api-key`). The key is saved to `<agentDir>/auth.json` by pi's built-in credential store. On next load, the extension reads it automatically.
 
 ## Config
 
-Base URL and model metadata are stored in `<agentDir>/extensions/provider-newapi.json`. The API key is managed separately by pi's built-in `<agentDir>/auth.json` (set via `/login newapi` or `NEWAPI_API_KEY` env var).
+Base URL and model metadata are stored in `<agentDir>/extensions/provider-newapi.json`. The API key is managed separately by pi's built-in `<agentDir>/auth.json` (set via `/login` or `NEWAPI_API_KEY` env var).
 
 ```json
 {
@@ -48,7 +47,7 @@ Base URL and model metadata are stored in `<agentDir>/extensions/provider-newapi
 }
 ```
 
-On load, if a key exists and `NEWAPI_BASE_URL` differs from stored, the base URL is updated. If `NEWAPI_BASE_URL` is not set, a warning is printed.
+On load, if `NEWAPI_BASE_URL` differs from stored, the base URL is updated. If `NEWAPI_BASE_URL` is not set, a warning is printed.
 
 `modelInfo` entries are auto-generated for models not found in the built-in model database. Edit them to adjust `reasoning`, `input` types, `contextWindow`, or `maxTokens`. Optionally add `thinkingLevelMap` (e.g. `{ "xhigh": "max" }`).
 

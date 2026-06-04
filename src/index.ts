@@ -5,12 +5,13 @@
  * NewAPI AI gateway and routes requests to the appropriate backend (Anthropic or
  * OpenAI) based on model ID prefix matching.
  *
- * Config:  <agentDir>/extensions/provider-newapi.json
- * Env:     NEWAPI_BASE_URL, NEWAPI_API_KEY (manually sourced for dev)
+ * Config:  <agentDir>/extensions/provider-newapi.json  (baseUrl, modelInfo)
+ * Key:     <agentDir>/auth.json                         (api_key, via /login)
+ * Env:     NEWAPI_BASE_URL, NEWAPI_API_KEY              (manually sourced for dev)
  *
  * Usage:
  *   source .env && pi --list-models
- *   /login newapi        -- persist API key
+ *   /login               -- interactively persist API key to auth.json
  *   /model newapi/<id>   -- select a model
  */
 
@@ -24,8 +25,6 @@ import {
 	type Context,
 	type Model,
 	type ModelThinkingLevel,
-	type OAuthCredentials,
-	type OAuthLoginCallbacks,
 	type SimpleStreamOptions,
 	type ThinkingLevelMap,
 } from "@earendil-works/pi-ai";
@@ -40,6 +39,7 @@ import { dirname, join } from "node:path";
 const OPENAI_MODEL_PREFIXES = ["gpt-", "o1", "o3", "o4"];
 const UNCONFIGURED_URL = "http://newapi.localhost/unconfigured";
 const CONFIG_FILENAME = "provider-newapi.json";
+const PROVIDER_NAME = "newapi";
 const QUOTA_PER_USD = 500_000;
 const TOKENS_PER_COST = 1_000_000;
 const DEFAULT_GROUP_RATE = 1.0;
@@ -57,7 +57,6 @@ interface NewAPIModelInfo {
 }
 
 interface NewAPIConfig {
-	key: string;
 	baseUrl: string;
 	modelInfo: Record<string, NewAPIModelInfo>;
 }
@@ -71,12 +70,11 @@ function readConfig(): NewAPIConfig {
 		const raw = readFileSync(getConfigPath(), "utf-8");
 		const data = JSON.parse(raw) as Record<string, unknown>;
 		return {
-			key: String(data.key ?? ""),
 			baseUrl: String(data.baseUrl ?? ""),
 			modelInfo: (data.modelInfo as Record<string, NewAPIModelInfo>) ?? {},
 		};
 	} catch {
-		return { key: "", baseUrl: "", modelInfo: {} };
+		return { baseUrl: "", modelInfo: {} };
 	}
 }
 
@@ -85,6 +83,21 @@ function writeConfig(config: NewAPIConfig): void {
 	const dir = dirname(path);
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 	writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
+}
+
+function readAuthKey(): string {
+	try {
+		const authPath = join(getAgentDir(), "auth.json");
+		const raw = readFileSync(authPath, "utf-8");
+		const data = JSON.parse(raw) as Record<string, unknown>;
+		const cred = data[PROVIDER_NAME] as Record<string, unknown> | undefined;
+		if (cred?.type === "api_key" && typeof cred.key === "string") {
+			return cred.key;
+		}
+	} catch {
+		// auth.json may not exist yet
+	}
+	return "";
 }
 
 // ---------------------------------------------------------------------------
@@ -187,44 +200,23 @@ interface RatioConfigResponse {
 }
 
 // ---------------------------------------------------------------------------
-// OAuth login — only saves key, not baseUrl
-// ---------------------------------------------------------------------------
-
-async function loginNewAPI(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
-	const key =
-		process.env.NEWAPI_API_KEY ||
-		(await callbacks.onPrompt({ message: "Enter NewAPI API key:", allowEmpty: false }));
-
-	const config = readConfig();
-	config.key = key;
-	writeConfig(config);
-
-	const oneYearMs = 365 * 24 * 60 * 60 * 1000;
-	return { refresh: key, access: key, expires: Date.now() + oneYearMs };
-}
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 export default async function (pi: ExtensionAPI) {
 	const config = readConfig();
-	const envKey = process.env.NEWAPI_API_KEY ?? "";
 	const envBaseUrl = (process.env.NEWAPI_BASE_URL ?? "").replace(/\/+$/, "");
 
-	const resolvedKey = config.key || envKey || "";
 	let resolvedBaseUrl = config.baseUrl || "";
 
 	// Reconcile baseUrl on load
-	if (resolvedKey) {
-		if (envBaseUrl) {
-			if (resolvedBaseUrl !== envBaseUrl) {
-				resolvedBaseUrl = envBaseUrl;
-				writeConfig({ key: resolvedKey, baseUrl: resolvedBaseUrl, modelInfo: config.modelInfo });
-			}
-		} else if (!resolvedBaseUrl) {
-			console.warn("NewAPI: baseUrl not configured. Set NEWAPI_BASE_URL environment variable.");
+	if (envBaseUrl) {
+		if (resolvedBaseUrl !== envBaseUrl) {
+			resolvedBaseUrl = envBaseUrl;
+			writeConfig({ baseUrl: resolvedBaseUrl, modelInfo: config.modelInfo });
 		}
+	} else if (!resolvedBaseUrl) {
+		console.warn("NewAPI: baseUrl not configured. Set NEWAPI_BASE_URL environment variable.");
 	}
 
 	// -----------------------------------------------------------------------
@@ -232,10 +224,12 @@ export default async function (pi: ExtensionAPI) {
 	// -----------------------------------------------------------------------
 
 	const modelConfigMap = new Map<string, EnrichedModel>();
-	let modelsFetched = false;
-	let fetchError: Error | undefined;
 
-	if (resolvedKey && resolvedBaseUrl) {
+	if (resolvedBaseUrl) {
+		const envKey = process.env.NEWAPI_API_KEY ?? "";
+		const authKey = readAuthKey();
+		const resolvedKey = envKey || authKey || "";
+
 		try {
 			// ratio_config (best-effort, no auth required)
 			let modelRatios: Record<string, number> = {};
@@ -347,13 +341,14 @@ export default async function (pi: ExtensionAPI) {
 			if (configDirty) {
 				writeConfig(config);
 			}
-
-			modelsFetched = true;
 		} catch (error) {
-			fetchError = error instanceof Error ? error : new Error(String(error));
+			const err = error instanceof Error ? error : new Error(String(error));
+			console.warn(
+				`NewAPI: model discovery failed — ${err.message}\n` +
+					"Falling back to unconfigured. Run /login to authenticate or set NEWAPI_API_KEY.",
+			);
+			resolvedBaseUrl = UNCONFIGURED_URL;
 		}
-	} else if (resolvedKey && !resolvedBaseUrl) {
-		console.warn("NewAPI: baseUrl not configured. Models will not be available until NEWAPI_BASE_URL is set.");
 	}
 
 	// -----------------------------------------------------------------------
@@ -372,7 +367,7 @@ export default async function (pi: ExtensionAPI) {
 			try {
 				const apiKey = options?.apiKey;
 				if (!apiKey)
-					throw new Error("No API key. Run /login newapi or set NEWAPI_API_KEY.");
+					throw new Error("No API key. Run /login or set NEWAPI_API_KEY.");
 
 				const cfg = modelConfigMap.get(model.id);
 				if (!cfg) throw new Error(`Unknown model: ${model.id}`);
@@ -435,11 +430,11 @@ export default async function (pi: ExtensionAPI) {
 	// Register provider
 	// -----------------------------------------------------------------------
 
-	pi.registerProvider("newapi", {
+	pi.registerProvider(PROVIDER_NAME, {
 		name: "NewAPI",
 		baseUrl: resolvedBaseUrl || UNCONFIGURED_URL,
 		apiKey: "$NEWAPI_API_KEY",
-		api: "newapi" as Api,
+		api: PROVIDER_NAME as Api,
 		models: Array.from(modelConfigMap.values(), (m) => ({
 			id: m.id,
 			name: m.name,
@@ -450,19 +445,8 @@ export default async function (pi: ExtensionAPI) {
 			contextWindow: m.contextWindow,
 			maxTokens: m.maxTokens,
 		})),
-		oauth: {
-			name: "NewAPI",
-			login: loginNewAPI,
-			refreshToken: async () => {
-				throw new Error("API key does not expire");
-			},
-			getApiKey: (cred) => cred.access,
-		},
 		streamSimple: streamNewAPI,
 	});
 
-	// Throw after registration so the provider is available for /login
-	if (fetchError) {
-		throw new Error(`NewAPI: model discovery failed — ${fetchError.message}`);
-	}
+
 }
