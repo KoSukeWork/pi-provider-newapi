@@ -43,7 +43,7 @@ const PROVIDER_NAME = "newapi";
 const QUOTA_PER_USD = 500_000;
 const TOKENS_PER_COST = 1_000_000;
 const DEFAULT_GROUP_RATE = 1.0;
-const FETCH_TIMEOUT_MS = 15_000;
+const FETCH_TIMEOUT_MS = 3_000;
 
 // ---------------------------------------------------------------------------
 // Helpers
