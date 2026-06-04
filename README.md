@@ -80,7 +80,7 @@ Base URL and model metadata are stored in `<agentDir>/extensions/provider-newapi
 
 On load, if `NEWAPI_BASE_URL` differs from stored, the base URL is updated. If `NEWAPI_BASE_URL` is not set, a warning is printed.
 
-`modelInfo` entries are auto-generated for models not found in the built-in model database. Edit them to adjust `reasoning`, `input` types, `contextWindow`, or `maxTokens`. Optionally add `thinkingLevelMap` (e.g. `{ "xhigh": "max" }`). When a previously unknown model later becomes known, the template is removed automatically.
+`modelInfo` entries are auto-generated for models not found in the built-in model database. Edit them to adjust `reasoning`, `input` types, `contextWindow`, or `maxTokens`. Optionally add `thinkingLevelMap` (e.g. `{ "xhigh": "max" }`). When a previously unknown model later becomes known, the config entry is removed and upstream values take precedence, with a warning showing any differences between the config and upstream values.
 
 ## How It Works
 
@@ -95,7 +95,7 @@ On load, if `NEWAPI_BASE_URL` differs from stored, the base URL is updated. If `
    - `cost.cacheRead  = modelRatio × cacheRatio × 2`
    - `cost.cacheWrite = modelRatio × createCacheRatio × 2`
 7. **Backend routing** — models matching `gpt-`, `o1`, `o3`, or `o4` prefix use OpenAI Responses API; all others use Anthropic Messages API
-8. **Model info templates** — unknown models (not in built-in data) get a template added to `provider-newapi.json` under `modelInfo` for manual editing. When a previously unknown model later becomes known, the template is removed automatically
+8. **Model info templates** — unknown models (not in built-in data) get a template added to `provider-newapi.json` under `modelInfo` for manual editing. When a previously unknown model later becomes known, the template is removed automatically and upstream values are used, with a warning logged showing any differences between config and upstream values
 
 ### Graceful Fallback
 

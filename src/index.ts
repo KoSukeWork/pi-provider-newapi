@@ -190,6 +190,7 @@ interface EnrichedModel {
 	contextWindow: number;
 	maxTokens: number;
 	isOpenAI: boolean;
+	compat?: Model<Api>["compat"];
 }
 
 function buildEnrichmentLookup(): Map<string, Model<Api>> {
@@ -334,11 +335,29 @@ export default async function (pi: ExtensionAPI) {
 
 				if (enriched) {
 					if (config.modelInfo[m.id]) {
+						const mi = config.modelInfo[m.id];
+						const diffs: string[] = [];
+						if (mi.reasoning !== enriched.reasoning) {
+							diffs.push(`reasoning ${mi.reasoning} → ${enriched.reasoning}`);
+						}
+						if (JSON.stringify(mi.input ?? ["text"]) !== JSON.stringify(enriched.input)) {
+							diffs.push(`input ${JSON.stringify(mi.input ?? ["text"])} → ${JSON.stringify(enriched.input)}`);
+						}
+						if (mi.contextWindow !== enriched.contextWindow) {
+							diffs.push(`contextWindow ${mi.contextWindow} → ${enriched.contextWindow}`);
+						}
+						if (mi.maxTokens !== enriched.maxTokens) {
+							diffs.push(`maxTokens ${mi.maxTokens} → ${enriched.maxTokens}`);
+						}
+						if (JSON.stringify(mi.thinkingLevelMap) !== JSON.stringify(enriched.thinkingLevelMap)) {
+							diffs.push(`thinkingLevelMap ${JSON.stringify(mi.thinkingLevelMap)} → ${JSON.stringify(enriched.thinkingLevelMap)}`);
+						}
+						const diffStr = diffs.length > 0 ? diffs.join(", ") : "none";
+						console.warn(
+							`NewAPI: model "${m.id}" now found in known models — using upstream values (config removed). Differences: ${diffStr}`,
+						);
 						delete config.modelInfo[m.id];
 						configDirty = true;
-						console.warn(
-							`NewAPI: model "${m.id}" now found in known models — removed from modelInfo`,
-						);
 					}
 					reasoning = enriched.reasoning;
 					thinkingLevelMap = enriched.thinkingLevelMap;
@@ -387,6 +406,7 @@ export default async function (pi: ExtensionAPI) {
 					contextWindow,
 					maxTokens,
 					isOpenAI,
+					compat: enriched?.compat,
 				});
 			}
 
@@ -490,6 +510,7 @@ export default async function (pi: ExtensionAPI) {
 		cost: m.cost,
 		contextWindow: m.contextWindow,
 		maxTokens: m.maxTokens,
+		compat: m.compat,
 	}));
 
 	if (resolvedBaseUrl === UNCONFIGURED_URL || providerModels.length === 0) {
