@@ -44,6 +44,15 @@ const QUOTA_PER_USD = 500_000;
 const TOKENS_PER_COST = 1_000_000;
 const DEFAULT_GROUP_RATE = 1.0;
 const FETCH_TIMEOUT_MS = 3_000;
+const ENRICHMENT_PROVIDERS = [
+	"deepseek",
+	"google",
+	"anthropic",
+	"minimax",
+	"moonshotai",
+	"openai",
+	"vercel-ai-gateway",
+] as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -166,8 +175,9 @@ function findRatio(modelId: string, ratios: Record<string, number>): number | un
 }
 
 // ---------------------------------------------------------------------------
-// Model enrichment — build a lookup from vercel-ai-gateway MODELS by
-// stripping the "provider/" prefix from model IDs
+// Model enrichment — build a lookup from multiple providers by
+// stripping the "provider/" prefix from model IDs.
+// Earlier providers take precedence over later ones.
 // ---------------------------------------------------------------------------
 
 interface EnrichedModel {
@@ -184,16 +194,24 @@ interface EnrichedModel {
 
 function buildEnrichmentLookup(): Map<string, Model<Api>> {
 	const lookup = new Map<string, Model<Api>>();
-	let vercelModels: Model<Api>[];
-	try {
-		vercelModels = getModels("vercel-ai-gateway") as Model<Api>[];
-	} catch {
-		return lookup;
+
+	for (const provider of ENRICHMENT_PROVIDERS) {
+		let providerModels: Model<Api>[];
+		try {
+			providerModels = getModels(provider) as Model<Api>[];
+		} catch {
+			continue;
+		}
+
+		for (const m of providerModels) {
+			const stripped = m.id.includes("/") ? m.id.slice(m.id.indexOf("/") + 1) : m.id;
+			const normalizedId = stripped.replaceAll(".", "-").toLowerCase();
+			if (!lookup.has(normalizedId)) {
+				lookup.set(normalizedId, m);
+			}
+		}
 	}
-	for (const m of vercelModels) {
-		const stripped = m.id.includes("/") ? m.id.slice(m.id.indexOf("/") + 1) : m.id;
-		lookup.set(stripped.replaceAll(".", "-").toLowerCase(), m);
-	}
+
 	return lookup;
 }
 

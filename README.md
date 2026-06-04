@@ -88,7 +88,7 @@ On load, if `NEWAPI_BASE_URL` differs from stored, the base URL is updated. If `
 2. **Ratio config fetch** — fetches `GET /api/ratio_config` (no auth required) for NewAPI's `model_ratio`, `completion_ratio`, `cache_ratio`, and `create_cache_ratio` maps. This step is best-effort — if it fails, costs simply report as `0`
 3. **Model discovery** — fetches `GET /v1/models` from the gateway (requires API key)
 4. **Ratio matching** — matches each model ID against ratio config keys using a three-step fallback: exact match → case-insensitive match → prefix match. This handles NewAPI's inconsistent naming (e.g. version tags, mixed casing)
-5. **Model enrichment** — matches discovered models against built-in model data from `vercel-ai-gateway` (normalized by stripping `provider/` prefix and converting to lowercase) to populate `contextWindow`, `maxTokens`, `reasoning`, `thinkingLevelMap`, and `input` types. Unknown models fall back to defaults (128K context / 4096 max output tokens / text-only)
+5. **Model enrichment** — matches discovered models against built-in model data from multiple providers, in this priority order: `deepseek`, `google`, `anthropic`, `minimax`, `moonshotai`, `openai`, `vercel-ai-gateway`. Model IDs are normalized by stripping any `provider/` prefix and converting to lowercase. Earlier providers win when the same model appears in more than one source. Enrichment populates `contextWindow`, `maxTokens`, `reasoning`, `thinkingLevelMap`, and `input` types. Unknown models fall back to defaults (128K context / 4096 max output tokens / text-only)
 6. **Cost calculation** — converts from NewAPI quota to USD per million tokens. Based on NewAPI's formula `Quota = (Input + Output × CompletionRate) × ModelRate × GroupRate` with `1 USD = 500,000 quota`:
    - `cost.input     = modelRatio × 2`
    - `cost.output    = modelRatio × completionRatio × 2`
@@ -111,6 +111,7 @@ This ensures pi never crashes on startup — it always presents a usable (if ine
 
 - [pi](https://github.com/earendil-works/pi-coding-agent) coding agent
 - NewAPI gateway
+- Built-in model metadata from the supported upstream providers listed above
 - For cost tracking: `ExposeRatioEnabled` must be `true` in gateway Settings → Operation → Ratio
 - API key with access to models via the gateway
 
