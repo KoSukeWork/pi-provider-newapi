@@ -43,6 +43,30 @@ const PROVIDER_NAME = "newapi";
 const QUOTA_PER_USD = 500_000;
 const TOKENS_PER_COST = 1_000_000;
 const DEFAULT_GROUP_RATE = 1.0;
+const FETCH_TIMEOUT_MS = 15_000;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function fetchWithTimeout(
+	url: string,
+	options: RequestInit & { timeoutMs?: number } = {},
+): Promise<Response> {
+	const { timeoutMs = FETCH_TIMEOUT_MS, ...fetchOptions } = options;
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		return await fetch(url, { ...fetchOptions, signal: controller.signal });
+	} catch (err) {
+		if ((err as Error).name === 'AbortError') {
+			throw new Error(`fetch(${url}) timed out after ${timeoutMs / 1000}s`);
+		}
+		throw err;
+	} finally {
+		clearTimeout(timer);
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Config persistence
@@ -238,7 +262,7 @@ export default async function (pi: ExtensionAPI) {
 			let createCacheRatios: Record<string, number> = {};
 
 			try {
-				const ratioRes = await fetch(`${resolvedBaseUrl}/api/ratio_config`);
+				const ratioRes = await fetchWithTimeout(`${resolvedBaseUrl}/api/ratio_config`);
 				if (ratioRes.ok) {
 					const ratioJson = (await ratioRes.json()) as RatioConfigResponse;
 					if (ratioJson.success) {
@@ -248,7 +272,10 @@ export default async function (pi: ExtensionAPI) {
 						createCacheRatios = ratioJson.data.create_cache_ratio ?? {};
 					}
 				}
-			} catch {
+			} catch (err) {
+				console.warn(
+					`NewAPI: /api/ratio_config failed — ${err instanceof Error ? err.message : String(err)}`,
+				);
 				// ratio_config is optional — proceed without costs
 			}
 
@@ -256,7 +283,7 @@ export default async function (pi: ExtensionAPI) {
 			const headers: Record<string, string> = {};
 			if (resolvedKey) headers["Authorization"] = `Bearer ${resolvedKey}`;
 
-			const modelsRes = await fetch(`${resolvedBaseUrl}/v1/models`, { headers });
+			const modelsRes = await fetchWithTimeout(`${resolvedBaseUrl}/v1/models`, { headers });
 			if (!modelsRes.ok) {
 				throw new Error(
 					`Failed to fetch /v1/models: ${modelsRes.status} ${modelsRes.statusText}`,
