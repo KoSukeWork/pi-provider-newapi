@@ -1,4 +1,7 @@
-# @pi-extension-provider-newapi
+# pi-provider-newapi
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![pi extension](https://img.shields.io/badge/extension-pi%20provider-green.svg)](https://github.com/ttimasdf/pi-provider-newapi)
 
 pi provider extension for self-hosted [NewAPI](https://github.com/QuantumNous/new-api) AI gateways.
 
@@ -9,7 +12,19 @@ Registers a single `newapi` provider with dynamic model discovery, automatic cos
 | `gpt-`, `o1`, `o3`, `o4` | OpenAI Responses | `{baseUrl}/v1` |
 | everything else | Anthropic Messages | `{baseUrl}` |
 
-## Setup
+**[中文文档](README_cn.md)**
+
+## Installation
+
+This is a [pi](https://github.com/earendil-works/pi-coding-agent) provider extension. It has no runtime dependencies — only peer dependencies on pi itself.
+
+```bash
+pnpm add pi-provider-newapi
+```
+
+Then ensure pi loads the extension. pi auto-discovers extensions listed in the `pi.extensions` field of `package.json`, so no extra configuration is needed after install.
+
+## Quick Start
 
 ### Option A: Environment variables (fast path)
 
@@ -22,16 +37,26 @@ The provider registers automatically on startup with discovered models.
 
 ### Option B: Interactive `/login` (persist key)
 
+```bash
+export NEWAPI_BASE_URL=https://ai.your-gateway.com
 ```
-pi> source .env          # sets NEWAPI_BASE_URL in dev
+
+```
 pi> /login
 ```
 
 Run `/login` in the pi session. pi will interactively prompt for the provider, and for the API key (`sk-your-api-key`). The key is saved to `<agentDir>/auth.json` by pi's built-in credential store. On next load, the extension reads it automatically.
 
-## Config
+## Configuration
 
 Base URL and model metadata are stored in `<agentDir>/extensions/provider-newapi.json`. The API key is managed separately by pi's built-in `<agentDir>/auth.json` (set via `/login` or `NEWAPI_API_KEY` env var).
+
+`<agentDir>` defaults to:
+
+| OS | Path |
+|---|---|
+| Linux / macOS | `~/.pi/agent` |
+| Windows | `%USERPROFILE%\.pi\agent` |
 
 ```json
 {
@@ -49,27 +74,44 @@ Base URL and model metadata are stored in `<agentDir>/extensions/provider-newapi
 
 On load, if `NEWAPI_BASE_URL` differs from stored, the base URL is updated. If `NEWAPI_BASE_URL` is not set, a warning is printed.
 
-`modelInfo` entries are auto-generated for models not found in the built-in model database. Edit them to adjust `reasoning`, `input` types, `contextWindow`, or `maxTokens`. Optionally add `thinkingLevelMap` (e.g. `{ "xhigh": "max" }`).
+`modelInfo` entries are auto-generated for models not found in the built-in model database. Edit them to adjust `reasoning`, `input` types, `contextWindow`, or `maxTokens`. Optionally add `thinkingLevelMap` (e.g. `{ "xhigh": "max" }`). When a previously unknown model later becomes known, the template is removed automatically.
 
-## How it works
+## How It Works
 
 1. **Config reconciliation** — reads stored key and base URL; syncs with `NEWAPI_BASE_URL` env var
-2. **Model discovery** — fetches `GET /v1/models` from the gateway
-3. **Model enrichment** — matches discovered models against built-in model data from `vercel-ai-gateway` to populate `contextWindow`, `maxTokens`, `reasoning`, `thinkingLevelMap`, and `input` types. Unknown models fall back to defaults (128K / 4096 tokens / text-only)
-4. **Cost calculation** — fetches `GET /api/ratio_config` (no auth required) for NewAPI's `model_ratio`, `completion_ratio`, `cache_ratio`, and `create_cache_ratio` maps. Converts from NewAPI quota to USD per million tokens:
-   - `cost.input   = modelRatio × 2`
-   - `cost.output  = modelRatio × completionRatio × 2`
+2. **Ratio config fetch** — fetches `GET /api/ratio_config` (no auth required) for NewAPI's `model_ratio`, `completion_ratio`, `cache_ratio`, and `create_cache_ratio` maps. This step is best-effort — if it fails, costs simply report as `0`
+3. **Model discovery** — fetches `GET /v1/models` from the gateway (requires API key)
+4. **Ratio matching** — matches each model ID against ratio config keys using a three-step fallback: exact match → case-insensitive match → prefix match. This handles NewAPI's inconsistent naming (e.g. version tags, mixed casing)
+5. **Model enrichment** — matches discovered models against built-in model data from `vercel-ai-gateway` (normalized by stripping `provider/` prefix and converting to lowercase) to populate `contextWindow`, `maxTokens`, `reasoning`, `thinkingLevelMap`, and `input` types. Unknown models fall back to defaults (128K context / 4096 max output tokens / text-only)
+6. **Cost calculation** — converts from NewAPI quota to USD per million tokens. Based on NewAPI's formula `Quota = (Input + Output × CompletionRate) × ModelRate × GroupRate` with `1 USD = 500,000 quota`:
+   - `cost.input     = modelRatio × 2`
+   - `cost.output    = modelRatio × completionRatio × 2`
    - `cost.cacheRead  = modelRatio × cacheRatio × 2`
    - `cost.cacheWrite = modelRatio × createCacheRatio × 2`
-5. **Backend routing** — models matching `gpt-`, `o1`, `o3`, or `o4` prefix use OpenAI Responses API; all others use Anthropic Messages API
-6. **Model info templates** — unknown models (not in built-in data) get a template added to `provider-newapi.json` under `modelInfo` for manual editing. When a previously unknown model later becomes known, the template is removed automatically.
+7. **Backend routing** — models matching `gpt-`, `o1`, `o3`, or `o4` prefix use OpenAI Responses API; all others use Anthropic Messages API
+8. **Model info templates** — unknown models (not in built-in data) get a template added to `provider-newapi.json` under `modelInfo` for manual editing. When a previously unknown model later becomes known, the template is removed automatically
+
+### Graceful Fallback
+
+If model discovery fails (network error, auth failure, etc.), the provider falls back to an **unconfigured** state:
+
+- Registers a placeholder model `newapi/unconfigured`
+- If an API key exists in `auth.json`, prompts user to run `/reload` then `/model`
+- If no key exists, prompts user to run `/login`
+
+This ensures pi never crashes on startup — it always presents a usable (if inert) provider.
 
 ## Requirements
 
+- [pi](https://github.com/earendil-works/pi-coding-agent) coding agent
 - NewAPI gateway
 - For cost tracking: `ExposeRatioEnabled` must be `true` in gateway Settings → Operation → Ratio
 - API key with access to models via the gateway
 
 ## Without ratio_config
 
-If the gateway has `ExposeRatioEnabled` set to `false`, the extension still works — all costs report as `0` (usage tracking disabled).
+If the gateway has `ExposeRatioEnabled` set to `false`, the extension still works — all costs report as `0` (usage tracking disabled). Model discovery and routing are unaffected.
+
+## License
+
+[MIT](LICENSE) © [ttimasdf](https://github.com/ttimasdf)
