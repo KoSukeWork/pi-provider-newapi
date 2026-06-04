@@ -266,6 +266,13 @@ export default async function (pi: ExtensionAPI) {
 			const modelsJson = (await modelsRes.json()) as OpenAIModelsResponse;
 			const apiModels = modelsJson.data ?? [];
 
+			if (apiModels.length === 0) {
+				console.warn(
+					"NewAPI: /v1/models returned zero models. " +
+						"The gateway may have no models assigned, or the API key may lack access.",
+				);
+			}
+
 			// Enrich from vercel-ai-gateway MODELS (lowercase lookup)
 			const enrichmentLookup = buildEnrichmentLookup();
 			let configDirty = false;
@@ -369,8 +376,7 @@ export default async function (pi: ExtensionAPI) {
 				if (!apiKey)
 					throw new Error("No API key. Run /login or set NEWAPI_API_KEY.");
 
-				const cfg = modelConfigMap.get(model.id);
-				if (!cfg) throw new Error(`Unknown model: ${model.id}`);
+				const cfg = modelConfigMap.get(model.id)!;
 
 				const streamOptions = { ...options, apiKey };
 
@@ -430,23 +436,50 @@ export default async function (pi: ExtensionAPI) {
 	// Register provider
 	// -----------------------------------------------------------------------
 
+	const providerModels = Array.from(modelConfigMap.values(), (m) => ({
+		id: m.id,
+		name: m.name,
+		reasoning: m.reasoning,
+		thinkingLevelMap: m.thinkingLevelMap,
+		input: m.input,
+		cost: m.cost,
+		contextWindow: m.contextWindow,
+		maxTokens: m.maxTokens,
+	}));
+
+	if (resolvedBaseUrl === UNCONFIGURED_URL || providerModels.length === 0) {
+		pi.registerProvider(PROVIDER_NAME, {
+			name: "NewAPI",
+			baseUrl: UNCONFIGURED_URL,
+			apiKey: "$NEWAPI_API_KEY",
+			api: PROVIDER_NAME as Api,
+			models: [
+				{
+					id: "unconfigured",
+					name: "NewAPI (unconfigured)",
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 1,
+					maxTokens: 1,
+				},
+			],
+			streamSimple: () => {
+				const errorMessage = readAuthKey()
+					? "NewAPI provider pending reload. Run /reload, then /model to select an available NewAPI model."
+					: "NewAPI is not configured. Run /login to authenticate.";
+				throw new Error(errorMessage);
+			},
+		});
+		return;
+	}
+
 	pi.registerProvider(PROVIDER_NAME, {
 		name: "NewAPI",
-		baseUrl: resolvedBaseUrl || UNCONFIGURED_URL,
+		baseUrl: resolvedBaseUrl,
 		apiKey: "$NEWAPI_API_KEY",
 		api: PROVIDER_NAME as Api,
-		models: Array.from(modelConfigMap.values(), (m) => ({
-			id: m.id,
-			name: m.name,
-			reasoning: m.reasoning,
-			thinkingLevelMap: m.thinkingLevelMap,
-			input: m.input,
-			cost: m.cost,
-			contextWindow: m.contextWindow,
-			maxTokens: m.maxTokens,
-		})),
+		models: providerModels,
 		streamSimple: streamNewAPI,
 	});
-
-
 }
