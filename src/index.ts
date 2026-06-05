@@ -2,8 +2,8 @@
  * NewAPI Provider Extension for pi
  *
  * Registers a single "newapi" provider that discovers models from a self-hosted
- * NewAPI AI gateway and routes requests to the appropriate backend (Anthropic or
- * OpenAI) based on model ID prefix matching.
+ * NewAPI AI gateway and routes requests using the API recommended by enriched
+ * built-in model metadata.
  *
  * Config:  <agentDir>/extensions/provider-newapi.json  (baseUrl, modelInfo)
  * Key:     <agentDir>/auth.json                         (api_key, via /login)
@@ -16,16 +16,10 @@
  */
 
 import {
-	createAssistantMessageEventStream,
 	getModels,
-	streamSimpleAnthropic,
-	streamSimpleOpenAIResponses,
 	type Api,
-	type AssistantMessageEventStream,
-	type Context,
 	type Model,
 	type ModelThinkingLevel,
-	type SimpleStreamOptions,
 	type ThinkingLevelMap,
 } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -36,7 +30,6 @@ import { dirname, join } from "node:path";
 // Constants
 // ---------------------------------------------------------------------------
 
-const OPENAI_MODEL_PREFIXES = ["gpt-", "o1", "o3", "o4"];
 const UNCONFIGURED_URL = "http://newapi.localhost/unconfigured";
 const CONFIG_FILENAME = "provider-newapi.json";
 const PROVIDER_NAME = "newapi";
@@ -44,13 +37,17 @@ const QUOTA_PER_USD = 500_000;
 const TOKENS_PER_COST = 1_000_000;
 const DEFAULT_GROUP_RATE = 1.0;
 const FETCH_TIMEOUT_MS = 3_000;
+const DEFAULT_MODEL_API: Api = "anthropic-messages";
 const ENRICHMENT_PROVIDERS = [
 	"deepseek",
+	"zai",
 	"google",
 	"anthropic",
 	"minimax",
 	"moonshotai",
+	"xiaomi",
 	"openai",
+	// fallback
 	"vercel-ai-gateway",
 ] as const;
 
@@ -77,11 +74,30 @@ async function fetchWithTimeout(
 	}
 }
 
+function joinBaseUrl(baseUrl: string, path: string): string {
+	return `${baseUrl.replace(/\/+$/, "")}${path}`;
+}
+
+function resolveApiBaseUrl(baseUrl: string, api: Api): string {
+	switch (api) {
+		case "openai-completions":
+		case "openai-responses":
+		case "openai-codex-responses":
+		case "azure-openai-responses":
+			return joinBaseUrl(baseUrl, "/v1");
+		case "google-generative-ai":
+			return joinBaseUrl(baseUrl, "/gemini/v1beta");
+		default:
+			return baseUrl;
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Config persistence
 // ---------------------------------------------------------------------------
 
 interface NewAPIModelInfo {
+	api?: Api;
 	reasoning: boolean;
 	input: ("text" | "image")[];
 	contextWindow: number;
@@ -188,15 +204,16 @@ interface ModelLookupItem {
 interface EnrichedModel {
 	id: string;
 	name: string;
+	provider: string;
 	reasoning: boolean;
 	thinkingLevelMap?: ThinkingLevelMap;
 	input: ("text" | "image")[];
 	cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
 	contextWindow: number;
 	maxTokens: number;
-	isOpenAI: boolean;
+	api: Api;
 	compat?: Model<Api>["compat"];
-	enrichedFrom?: string;
+	modelInfoSource: string;
 }
 
 function buildEnrichmentLookup(): Map<string, ModelLookupItem> {
@@ -214,7 +231,14 @@ function buildEnrichmentLookup(): Map<string, ModelLookupItem> {
 			const stripped = m.id.includes("/") ? m.id.slice(m.id.indexOf("/") + 1) : m.id;
 			const normalizedId = stripped.replaceAll(".", "-").toLowerCase();
 			if (!lookup.has(normalizedId)) {
-				lookup.set(normalizedId, { model: m, source: provider });
+				const model = {
+					...m,
+					compat: {
+						...(m.compat as Record<string, unknown> | undefined),
+						supportsDeveloperRole: provider === "anthropic" || provider === "openai",
+					} as Model<Api>["compat"],
+				};
+				lookup.set(normalizedId, { model, source: provider });
 			}
 		}
 	}
@@ -338,11 +362,15 @@ export default async function (pi: ExtensionAPI) {
 				let input: ("text" | "image")[];
 				let contextWindow: number;
 				let maxTokens: number;
+				let api: Api;
 
 				if (enriched) {
 					if (config.modelInfo[m.id]) {
 						const mi = config.modelInfo[m.id];
 						const diffs: string[] = [];
+						if (mi.api !== undefined && mi.api !== enriched.model.api) {
+							diffs.push(`api ${mi.api} → ${enriched.model.api}`);
+						}
 						if (mi.reasoning !== enriched.model.reasoning) {
 							diffs.push(`reasoning ${mi.reasoning} → ${enriched.model.reasoning}`);
 						}
@@ -370,9 +398,19 @@ export default async function (pi: ExtensionAPI) {
 					input = enriched.model.input;
 					contextWindow = enriched.model.contextWindow;
 					maxTokens = enriched.model.maxTokens;
+					if (enriched.model.api) {
+						api = enriched.model.api;
+					} else {
+						api = DEFAULT_MODEL_API;
+						console.warn(
+							`NewAPI: enriched model "${m.id}" from ${enriched.source} has no api value — ` +
+								`falling back to ${DEFAULT_MODEL_API}`,
+						);
+					}
 				} else {
 					if (!config.modelInfo[m.id]) {
 						config.modelInfo[m.id] = {
+							api: DEFAULT_MODEL_API,
 							reasoning: false,
 							input: ["text"],
 							contextWindow: 128000,
@@ -389,17 +427,19 @@ export default async function (pi: ExtensionAPI) {
 					input = mi.input ?? ["text"];
 					contextWindow = mi.contextWindow ?? 128000;
 					maxTokens = mi.maxTokens ?? 4096;
+					api = mi.api ?? DEFAULT_MODEL_API;
 				}
 
 				const mr = findRatio(m.id, modelRatios) ?? 0;
 				const cr = findRatio(m.id, completionRatios) ?? 1;
 				const cacheR = findRatio(m.id, cacheRatios) ?? 0;
 				const createCacheR = findRatio(m.id, createCacheRatios) ?? 0;
-				const isOpenAI = OPENAI_MODEL_PREFIXES.some((p) => m.id.startsWith(p));
 
 				modelConfigMap.set(m.id, {
 					id: m.id,
 					name: enriched?.model.name ?? m.id,
+					provider: enriched?.model.provider ?? PROVIDER_NAME,
+					modelInfoSource: enriched ? `built-in:${enriched.source}` : "config:modelInfo",
 					reasoning,
 					thinkingLevelMap,
 					input,
@@ -411,9 +451,8 @@ export default async function (pi: ExtensionAPI) {
 					},
 					contextWindow,
 					maxTokens,
-					isOpenAI,
+					api,
 					compat: enriched?.model.compat,
-					enrichedFrom: enriched?.source,
 				});
 			}
 
@@ -431,86 +470,14 @@ export default async function (pi: ExtensionAPI) {
 	}
 
 	// -----------------------------------------------------------------------
-	// Custom stream handler — routes to Anthropic or OpenAI based on model
-	// prefix matching
-	// -----------------------------------------------------------------------
-
-	function streamNewAPI(
-		model: Model<Api>,
-		context: Context,
-		options?: SimpleStreamOptions,
-	): AssistantMessageEventStream {
-		const stream = createAssistantMessageEventStream();
-
-		(async () => {
-			try {
-				const apiKey = options?.apiKey;
-				if (!apiKey)
-					throw new Error("No API key. Run /login or set NEWAPI_API_KEY.");
-
-				const cfg = modelConfigMap.get(model.id)!;
-
-				const streamOptions = { ...options, apiKey };
-
-				const innerStream = cfg.isOpenAI
-					? streamSimpleOpenAIResponses(
-							{
-								...model,
-								baseUrl: `${resolvedBaseUrl}/v1`,
-								api: "openai-responses",
-							} as Model<"openai-responses">,
-							context,
-							streamOptions,
-						)
-					: streamSimpleAnthropic(
-							{
-								...model,
-								baseUrl: resolvedBaseUrl,
-								api: "anthropic-messages",
-							} as Model<"anthropic-messages">,
-							context,
-							streamOptions,
-						);
-
-				for await (const event of innerStream) stream.push(event);
-				stream.end();
-			} catch (error) {
-				stream.push({
-					type: "error",
-					reason: "error",
-					error: {
-						role: "assistant",
-						content: [],
-						api: model.api,
-						provider: model.provider,
-						model: model.id,
-						usage: {
-							input: 0,
-							output: 0,
-							cacheRead: 0,
-							cacheWrite: 0,
-							totalTokens: 0,
-							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-						},
-						stopReason: "error",
-						errorMessage: error instanceof Error ? error.message : String(error),
-						timestamp: Date.now(),
-					},
-				});
-				stream.end();
-			}
-		})();
-
-		return stream;
-	}
-
-	// -----------------------------------------------------------------------
 	// Register provider
 	// -----------------------------------------------------------------------
 
 	const providerModels = Array.from(modelConfigMap.values(), (m) => ({
 		id: m.id,
 		name: m.name,
+		api: m.api,
+		baseUrl: resolveApiBaseUrl(resolvedBaseUrl, m.api),
 		reasoning: m.reasoning,
 		thinkingLevelMap: m.thinkingLevelMap,
 		input: m.input,
@@ -518,7 +485,6 @@ export default async function (pi: ExtensionAPI) {
 		contextWindow: m.contextWindow,
 		maxTokens: m.maxTokens,
 		compat: m.compat,
-		enrichedFrom: m.enrichedFrom,
 	}));
 
 	if (resolvedBaseUrl === UNCONFIGURED_URL || providerModels.length === 0) {
@@ -552,8 +518,6 @@ export default async function (pi: ExtensionAPI) {
 		name: "NewAPI",
 		baseUrl: resolvedBaseUrl,
 		apiKey: "$NEWAPI_API_KEY",
-		api: PROVIDER_NAME as Api,
 		models: providerModels,
-		streamSimple: streamNewAPI,
 	});
 }
