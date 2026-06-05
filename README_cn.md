@@ -9,9 +9,8 @@
 
 | 推荐 API | 端点 |
 |---|---|
-| `openai-completions`、`openai-responses`、`openai-codex-responses`、`azure-openai-responses` | `{baseUrl}/v1` |
-| `google-generative-ai` | `{baseUrl}/gemini/v1beta` |
-| `anthropic-messages` 及其他 API | `{baseUrl}` |
+| `openai-completions`、`openai-responses` | `{baseUrl}/v1` |
+| `anthropic-messages` | `{baseUrl}` |
 
 **[English](README.md)**
 
@@ -90,7 +89,7 @@ pi> /login
 2. **费率配置获取** — 从网关获取 `GET /api/ratio_config`（无需认证），读取 NewAPI 的 `model_ratio`、`completion_ratio`、`cache_ratio` 和 `create_cache_ratio` 映射。此步骤为尽力而为——如果失败，费用将报告为 `0`
 3. **模型发现** — 从网关获取 `GET /v1/models`（需要 API Key）
 4. **费率匹配** — 通过三级回退机制将每个模型 ID 与费率配置键匹配：精确匹配 → 不区分大小写匹配 → 前缀匹配。这处理了 NewAPI 不一致的命名（如版本标签、混合大小写）
-5. **模型增强** — 按 `deepseek`、`zai`、`google`、`anthropic`、`minimax`、`moonshotai`、`xiaomi`、`openai`、`vercel-ai-gateway` 的优先级，将发现的模型与内置模型数据匹配（通过去除 `provider/` 前缀并转换为小写进行标准化），以填充 `api`、`contextWindow`、`maxTokens`、`reasoning`、`thinkingLevelMap`、`input` 类型和兼容性设置。增强时，`anthropic` 和 `openai` 来源模型的 `supportsDeveloperRole` 设置为 `true`，其他来源设置为 `false`。未知模型使用默认值（`anthropic-messages`、128K 上下文 / 4096 最大输出 token / 仅文本）
+5. **模型增强** — 按 `deepseek`、`zai`、`google`、`anthropic`、`minimax`、`moonshotai`、`xiaomi`、`openai`、`vercel-ai-gateway` 的优先级，将发现的模型与内置模型数据匹配。构建查找表时，会跳过 NewAPI 不支持的内置 API（仅保留 `openai-completions`、`openai-responses` 或 `anthropic-messages`）。模型 ID 会通过去除 `provider/` 前缀并转换为小写进行标准化。更靠前的 provider 在同一模型出现在多个来源时优先。增强会填充 `api`、`contextWindow`、`maxTokens`、`reasoning`、`thinkingLevelMap`、`input` 类型和兼容性设置。增强时，`anthropic` 和 `openai` 来源模型的 `supportsDeveloperRole` 设置为 `true`，其他来源设置为 `false`。未知模型使用默认值（`anthropic-messages`、128K 上下文 / 4096 最大输出 token / 仅文本）
 6. **费用计算** — 将 NewAPI 配额转换为每百万 token 的美元价格。基于 NewAPI 公式 `Quota = (Input + Output × CompletionRate) × ModelRate × GroupRate`，其中 `1 USD = 500,000 配额`：
    - `cost.input     = modelRatio × 2`
    - `cost.output    = modelRatio × completionRatio × 2`

@@ -38,6 +38,11 @@ const TOKENS_PER_COST = 1_000_000;
 const DEFAULT_GROUP_RATE = 1.0;
 const FETCH_TIMEOUT_MS = 3_000;
 const DEFAULT_MODEL_API: Api = "anthropic-messages";
+const SUPPORTED_NEWAPI_MODEL_APIS = new Set<Api>([
+	"anthropic-messages",
+	"openai-completions",
+	"openai-responses",
+]);
 const ENRICHMENT_PROVIDERS = [
 	"deepseek",
 	"zai",
@@ -78,15 +83,15 @@ function joinBaseUrl(baseUrl: string, path: string): string {
 	return `${baseUrl.replace(/\/+$/, "")}${path}`;
 }
 
+function isSupportedNewAPIModelApi(api: Api): boolean {
+	return SUPPORTED_NEWAPI_MODEL_APIS.has(api);
+}
+
 function resolveApiBaseUrl(baseUrl: string, api: Api): string {
 	switch (api) {
 		case "openai-completions":
 		case "openai-responses":
-		case "openai-codex-responses":
-		case "azure-openai-responses":
 			return joinBaseUrl(baseUrl, "/v1");
-		case "google-generative-ai":
-			return joinBaseUrl(baseUrl, "/gemini/v1beta");
 		default:
 			return baseUrl;
 	}
@@ -228,6 +233,8 @@ function buildEnrichmentLookup(): Map<string, ModelLookupItem> {
 		}
 
 		for (const m of providerModels) {
+			if (!isSupportedNewAPIModelApi(m.api)) continue;
+
 			const stripped = m.id.includes("/") ? m.id.slice(m.id.indexOf("/") + 1) : m.id;
 			const normalizedId = stripped.replaceAll(".", "-").toLowerCase();
 			if (!lookup.has(normalizedId)) {

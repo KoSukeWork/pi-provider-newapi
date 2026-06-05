@@ -9,9 +9,8 @@ Registers a single `newapi` provider with dynamic model discovery, automatic cos
 
 | Recommended API | Endpoint |
 |---|---|
-| `openai-completions`, `openai-responses`, `openai-codex-responses`, `azure-openai-responses` | `{baseUrl}/v1` |
-| `google-generative-ai` | `{baseUrl}/gemini/v1beta` |
-| `anthropic-messages` and other APIs | `{baseUrl}` |
+| `openai-completions`, `openai-responses` | `{baseUrl}/v1` |
+| `anthropic-messages` | `{baseUrl}` |
 
 **[中文文档](https://github.com/ttimasdf/pi-provider-newapi/blob/main/README_cn.md)**
 
@@ -90,7 +89,7 @@ On load, if `NEWAPI_BASE_URL` differs from stored, the base URL is updated. If `
 2. **Ratio config fetch** — fetches `GET /api/ratio_config` (no auth required) for NewAPI's `model_ratio`, `completion_ratio`, `cache_ratio`, and `create_cache_ratio` maps. This step is best-effort — if it fails, costs simply report as `0`
 3. **Model discovery** — fetches `GET /v1/models` from the gateway (requires API key)
 4. **Ratio matching** — matches each model ID against ratio config keys using a three-step fallback: exact match → case-insensitive match → prefix match. This handles NewAPI's inconsistent naming (e.g. version tags, mixed casing)
-5. **Model enrichment** — matches discovered models against built-in model data from multiple providers, in this priority order: `deepseek`, `zai`, `google`, `anthropic`, `minimax`, `moonshotai`, `xiaomi`, `openai`, `vercel-ai-gateway`. Model IDs are normalized by stripping any `provider/` prefix and converting to lowercase. Earlier providers win when the same model appears in more than one source. Enrichment populates `api`, `contextWindow`, `maxTokens`, `reasoning`, `thinkingLevelMap`, `input` types, and compatibility settings. During enrichment, `supportsDeveloperRole` is set to `true` for `anthropic` and `openai` sources and `false` for all others. Unknown models fall back to defaults (`anthropic-messages`, 128K context / 4096 max output tokens / text-only)
+5. **Model enrichment** — matches discovered models against built-in model data from multiple providers, in this priority order: `deepseek`, `zai`, `google`, `anthropic`, `minimax`, `moonshotai`, `xiaomi`, `openai`, `vercel-ai-gateway`. Models whose built-in API is not supported by NewAPI (`openai-completions`, `openai-responses`, or `anthropic-messages`) are skipped during lookup construction. Model IDs are normalized by stripping any `provider/` prefix and converting to lowercase. Earlier providers win when the same model appears in more than one source. Enrichment populates `api`, `contextWindow`, `maxTokens`, `reasoning`, `thinkingLevelMap`, `input` types, and compatibility settings. During enrichment, `supportsDeveloperRole` is set to `true` for `anthropic` and `openai` sources and `false` for all others. Unknown models fall back to defaults (`anthropic-messages`, 128K context / 4096 max output tokens / text-only)
 6. **Cost calculation** — converts from NewAPI quota to USD per million tokens. Based on NewAPI's formula `Quota = (Input + Output × CompletionRate) × ModelRate × GroupRate` with `1 USD = 500,000 quota`:
    - `cost.input     = modelRatio × 2`
    - `cost.output    = modelRatio × completionRatio × 2`
