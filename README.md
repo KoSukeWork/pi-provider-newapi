@@ -5,7 +5,7 @@
 
 [pi](https://github.com/earendil-works/pi) coding agent provider extension for self-hosted [NewAPI](https://github.com/QuantumNous/new-api) AI gateways.
 
-Registers a single `newapi` provider with dynamic model discovery, automatic cost calculation, and backend routing based on each model's enriched API metadata:
+Supports **multiple named providers**, each backed by a separate NewAPI instance. On startup, each provider is discovered, enriched from pi's built-in model metadata, and registered. API routing is automatic:
 
 | Recommended API | Endpoint |
 |---|---|
@@ -15,8 +15,6 @@ Registers a single `newapi` provider with dynamic model discovery, automatic cos
 **[中文文档](https://github.com/ttimasdf/pi-provider-newapi/blob/main/README_cn.md)**
 
 ## Installation
-
-This is a [pi](https://github.com/earendil-works/pi) coding agent provider extension. It has no runtime dependencies — only peer dependencies on pi itself.
 
 ```bash
 pi install npm:pi-provider-newapi
@@ -28,34 +26,79 @@ Or install from git:
 pi install git:github.com/ttimasdf/pi-provider-newapi
 ```
 
-The extension is auto-discovered via the `pi.extensions` field in `package.json` — no extra configuration is needed after install.
+The extension is auto-discovered via the `pi.extensions` field in `package.json`.
 
 ## Quick Start
 
-### Option A: Environment variables (fast path)
+Run `/newapi-provider-add` inside a pi session. The command will prompt you for:
 
-```bash
-export NEWAPI_BASE_URL=https://ai.your-gateway.com
-export NEWAPI_API_KEY=sk-your-api-key
-```
+1. **Provider name** — an identifier you choose (e.g. `my_gateway`). Must not be an existing built-in pi provider name.
+2. **Base URL** — root URL of your NewAPI instance (e.g. `https://ai.example.com`).
+3. **API Key** — your NewAPI key.
 
-The provider registers automatically on startup with discovered models.
-
-### Option B: Interactive `/login` (persist key)
-
-```bash
-export NEWAPI_BASE_URL=https://ai.your-gateway.com
-```
+The command verifies connectivity before saving anything. On success it registers the provider immediately — no `/reload` needed.
 
 ```
-pi> /login
+pi> /newapi-provider-add my_gateway
+Provider name: my_gateway
+Base URL: https://ai.example.com
+API Key: sk-your-api-key
+✓ Provider "my_gateway" added with 42 models.
 ```
 
-Run `/login` in the pi session. pi will interactively prompt for the provider, and for the API key (`sk-your-api-key`). The key is saved to `<agentDir>/auth.json` by pi's built-in credential store. On next load, the extension reads it automatically.
+You can add as many providers as you like. Each is registered under its own name:
+
+```
+pi> /model my_gateway/claude-sonnet-4-5
+```
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `/newapi-provider-add [name]` | Add a new provider (interactive prompts) |
+| `/newapi-provider-remove [name]` | Remove a provider — unregisters, deletes config + credentials |
+| `/newapi-provider-list` | Show all configured providers with base URL, auth status, and model override count |
 
 ## Configuration
 
-Base URL and model metadata are stored in `<agentDir>/extensions/provider-newapi.json`. The API key is managed separately by pi's built-in `<agentDir>/auth.json` (set via `/login` or `NEWAPI_API_KEY` env var).
+### Config file
+
+`<agentDir>/extensions/provider-newapi.json`
+
+```json
+{
+  "providers": {
+    "my_gateway": {
+      "baseUrl": "https://ai.example.com",
+      "modelOverrides": {
+        "unknown-model-id": {
+          "api": "anthropic-messages",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 128000,
+          "maxTokens": 4096
+        }
+      }
+    },
+    "second_gateway": {
+      "baseUrl": "https://gw2.example.com",
+      "modelOverrides": {}
+    }
+  },
+  "settings": {
+    "onboardingWarnCountdown": 3
+  }
+}
+```
+
+- **`providers`** — one entry per NewAPI instance. The key is the provider name pi registers.
+- **`modelOverrides`** — manually supply or override metadata for models not in pi's built-in catalog. The extension auto-populates a template entry for every unknown model it discovers; edit the values as needed. For known models, an entry is retained and applied on top of the enriched built-in metadata.
+- **`settings.onboardingWarnCountdown`** — internal counter; decremented each startup while no providers are configured.
+
+### Credentials
+
+API keys are stored in pi's standard `<agentDir>/auth.json`, keyed by provider name. `/newapi-provider-add` writes them there automatically. You can also use pi's `/login` command to update an existing provider's key after initial setup.
 
 `<agentDir>` defaults to:
 
@@ -64,62 +107,26 @@ Base URL and model metadata are stored in `<agentDir>/extensions/provider-newapi
 | Linux / macOS | `~/.pi/agent` |
 | Windows | `%USERPROFILE%\.pi\agent` |
 
+### Invalid config
+
+If `provider-newapi.json` cannot be parsed or has an unexpected shape, the extension backs it up to `provider-newapi.json.bak`, starts with an empty config, and prints a warning. Use `/newapi-provider-add` to reconfigure.
+
+## Multiple providers example
+
 ```json
 {
-  "baseUrl": "https://ai.your-gateway.com",
-  "modelInfo": {
-    "unknown-model-id": {
-      "api": "anthropic-messages",
-      "reasoning": false,
-      "input": ["text"],
-      "contextWindow": 128000,
-      "maxTokens": 4096
+  "providers": {
+    "internal": {
+      "baseUrl": "https://ai.corp.internal",
+      "modelOverrides": {}
+    },
+    "personal": {
+      "baseUrl": "https://my-newapi.fly.dev",
+      "modelOverrides": {}
     }
-  }
+  },
+  "settings": {}
 }
 ```
 
-On load, if `NEWAPI_BASE_URL` differs from stored, the base URL is updated. If `NEWAPI_BASE_URL` is not set, a warning is printed.
-
-`modelInfo` entries are auto-generated for models not found in the built-in model database. Edit them to adjust `api`, `reasoning`, `input` types, `contextWindow`, or `maxTokens`. Optionally add `thinkingLevelMap` (e.g. `{ "xhigh": "max" }`). When a previously unknown model later becomes known, the config entry is removed and upstream values take precedence, with a warning showing any differences between the config and upstream values.
-
-## How It Works
-
-1. **Config reconciliation** — reads stored key and base URL; syncs with `NEWAPI_BASE_URL` env var
-2. **Ratio config fetch** — fetches `GET /api/ratio_config` (no auth required) for NewAPI's `model_ratio`, `completion_ratio`, `cache_ratio`, and `create_cache_ratio` maps. This step is best-effort — if it fails, costs simply report as `0`
-3. **Model discovery** — fetches `GET /v1/models` from the gateway (requires API key)
-4. **Ratio matching** — matches each model ID against ratio config keys using a three-step fallback: exact match → case-insensitive match → prefix match. This handles NewAPI's inconsistent naming (e.g. version tags, mixed casing)
-5. **Model enrichment** — matches discovered models against built-in model data from multiple providers, in this priority order: `deepseek`, `zai`, `google`, `anthropic`, `minimax`, `moonshotai`, `xiaomi`, `openai`, `vercel-ai-gateway`. Models whose built-in API is not supported by NewAPI (`openai-completions`, `openai-responses`, or `anthropic-messages`) are skipped during lookup construction. Model IDs are normalized by stripping any `provider/` prefix and converting to lowercase. Earlier providers win when the same model appears in more than one source. Enrichment populates `api`, `contextWindow`, `maxTokens`, `reasoning`, `thinkingLevelMap`, `input` types, and compatibility settings. During enrichment, `supportsDeveloperRole` is set to `true` for `anthropic` and `openai` sources and `false` for all others. Unknown models fall back to defaults (`anthropic-messages`, 128K context / 4096 max output tokens / text-only)
-6. **Cost calculation** — converts from NewAPI quota to USD per million tokens. Based on NewAPI's formula `Quota = (Input + Output × CompletionRate) × ModelRate × GroupRate` with `1 USD = 500,000 quota`:
-   - `cost.input     = modelRatio × 2`
-   - `cost.output    = modelRatio × completionRatio × 2`
-   - `cost.cacheRead  = modelRatio × cacheRatio × 2`
-   - `cost.cacheWrite = modelRatio × createCacheRatio × 2`
-7. **Backend routing** — each registered model carries its enriched `api` and endpoint, so pi routes through the appropriate built-in API handler instead of guessing from model ID prefixes
-8. **Model info templates** — unknown models (not in built-in data) get a template added to `provider-newapi.json` under `modelInfo` for manual editing. When a previously unknown model later becomes known, the template is removed automatically and upstream values are used, with a warning logged showing any differences between config and upstream values
-
-### Graceful Fallback
-
-If model discovery fails (network error, auth failure, etc.), the provider falls back to an **unconfigured** state:
-
-- Registers a placeholder model `newapi/unconfigured`
-- If an API key exists in `auth.json`, prompts user to run `/reload` then `/model`
-- If no key exists, prompts user to run `/login`
-
-This ensures pi never crashes on startup — it always presents a usable (if inert) provider.
-
-## Requirements
-
-- [pi](https://github.com/earendil-works/pi-coding-agent) coding agent
-- NewAPI gateway
-- Built-in model metadata from the supported upstream providers listed above
-- For cost tracking: `ExposeRatioEnabled` must be `true` in gateway Settings → Operation → Ratio
-- API key with access to models via the gateway
-
-## Without ratio_config
-
-If the gateway has `ExposeRatioEnabled` set to `false`, the extension still works — all costs report as `0` (usage tracking disabled). Model discovery and routing are unaffected.
-
-## License
-
-[MIT](LICENSE) © [ttimasdf](https://github.com/ttimasdf)
+Models from both providers appear in `/model` under their respective provider namespaces (`internal/<id>`, `personal/<id>`).

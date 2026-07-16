@@ -5,18 +5,16 @@
 
 [pi](https://github.com/earendil-works/pi) coding agent 的自托管 [NewAPI](https://github.com/QuantumNous/new-api) AI 网关 provider 扩展。
 
-注册一个 `newapi` provider，支持动态模型发现、自动费用计算，并根据每个模型增强后的 API 元数据自动路由到对应后端：
+支持**多个命名 provider**，每个 provider 对应一个独立的 NewAPI 实例。启动时，每个 provider 会自动发现模型、从 pi 内置元数据中进行增强，并完成注册。API 路由自动完成：
 
 | 推荐 API | 端点 |
 |---|---|
 | `openai-completions`、`openai-responses` | `{baseUrl}/v1` |
 | `anthropic-messages` | `{baseUrl}` |
 
-**[English](README.md)**
+**[English README](https://github.com/ttimasdf/pi-provider-newapi/blob/main/README.md)**
 
 ## 安装
-
-本扩展是 [pi](https://github.com/earendil-works/pi) coding agent 的 provider 扩展，没有额外的运行时依赖，仅需 pi 本身作为 peer 依赖。
 
 ```bash
 pi install npm:pi-provider-newapi
@@ -28,97 +26,107 @@ pi install npm:pi-provider-newapi
 pi install git:github.com/ttimasdf/pi-provider-newapi
 ```
 
-扩展通过 `package.json` 中的 `pi.extensions` 字段自动发现——安装后无需额外配置。
+扩展通过 `package.json` 中的 `pi.extensions` 字段自动发现，无需额外配置。
 
-## 快速开始
+## 快速上手
 
-### 方式 A：环境变量（快速方式）
+在 pi 会话中运行 `/newapi-provider-add`，命令将依次提示输入：
 
-```bash
-export NEWAPI_BASE_URL=https://ai.your-gateway.com
-export NEWAPI_API_KEY=sk-your-api-key
-```
+1. **Provider 名称** — 自定义标识符（如 `my_gateway`），不能与 pi 内置 provider 名称重复。
+2. **Base URL** — NewAPI 实例的根地址（如 `https://ai.example.com`）。
+3. **API Key** — NewAPI 密钥。
 
-扩展在启动时自动注册，并发现可用模型。
-
-### 方式 B：交互式 `/login`（持久化密钥）
-
-```bash
-export NEWAPI_BASE_URL=https://ai.your-gateway.com
-```
+命令在保存任何内容前会先验证连通性。成功后立即注册 provider，无需 `/reload`。
 
 ```
-pi> /login
+pi> /newapi-provider-add my_gateway
+Provider name: my_gateway
+Base URL: https://ai.example.com
+API Key: sk-your-api-key
+✓ Provider "my_gateway" added with 42 models.
 ```
 
-在 pi 会话中运行 `/login`，pi 会交互式地提示选择 provider 并输入 API Key（如 `sk-your-api-key`）。密钥会通过 pi 内置的凭据存储保存到 `<agentDir>/auth.json`。下次启动时扩展会自动读取。
+可添加任意数量的 provider，每个 provider 以其名称独立注册：
 
-## 配置
+```
+pi> /model my_gateway/claude-sonnet-4-5
+```
 
-基础 URL 和模型元数据存储在 `<agentDir>/extensions/provider-newapi.json`。API Key 由 pi 内置的 `<agentDir>/auth.json` 单独管理（通过 `/login` 或 `NEWAPI_API_KEY` 环境变量设置）。
+## 命令
 
-`<agentDir>` 默认值为：
-
-| 操作系统 | 路径 |
+| 命令 | 说明 |
 |---|---|
-| Linux / macOS | `~/.pi/agent` |
-| Windows | `%USERPROFILE%\.pi\agent` |
+| `/newapi-provider-add [name]` | 添加新 provider（交互式提示） |
+| `/newapi-provider-remove [name]` | 移除 provider，同时注销注册、删除配置和凭据 |
+| `/newapi-provider-list` | 显示所有已配置 provider 的地址、认证状态和模型覆盖数 |
+
+## 配置说明
+
+### 配置文件
+
+`<agentDir>/extensions/provider-newapi.json`
 
 ```json
 {
-  "baseUrl": "https://ai.your-gateway.com",
-  "modelInfo": {
-    "unknown-model-id": {
-      "api": "anthropic-messages",
-      "reasoning": false,
-      "input": ["text"],
-      "contextWindow": 128000,
-      "maxTokens": 4096
+  "providers": {
+    "my_gateway": {
+      "baseUrl": "https://ai.example.com",
+      "modelOverrides": {
+        "unknown-model-id": {
+          "api": "anthropic-messages",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 128000,
+          "maxTokens": 4096
+        }
+      }
+    },
+    "second_gateway": {
+      "baseUrl": "https://gw2.example.com",
+      "modelOverrides": {}
     }
+  },
+  "settings": {
+    "onboardingWarnCountdown": 3
   }
 }
 ```
 
-启动时，如果 `NEWAPI_BASE_URL` 与存储值不同，基础 URL 会自动更新。如果未设置 `NEWAPI_BASE_URL`，则会打印警告。
+- **`providers`** — 每个 NewAPI 实例对应一个条目，键名即为 pi 注册的 provider 名称。
+- **`modelOverrides`** — 手动补充或覆盖 pi 内置目录中未收录的模型元数据。扩展会为每个未知模型自动生成模板条目，按需编辑即可。对于已收录的模型，条目会保留，并在增强后的内置元数据之上应用覆盖。
+- **`settings.onboardingWarnCountdown`** — 内部计数器；未配置任何 provider 时，每次启动递减一次。
 
-`modelInfo` 条目会为内置模型数据库中未找到的模型自动生成。你可以编辑它们以调整 `api`、`reasoning`、`input` 类型、`contextWindow` 或 `maxTokens`。也可以选择添加 `thinkingLevelMap`（如 `{ "xhigh": "max" }`）。当之前未知的模型后来被识别时，该模板会自动移除。
+### 凭据存储
 
-## 工作原理
+API 密钥存储在 pi 标准的 `<agentDir>/auth.json` 中，以 provider 名称为键。`/newapi-provider-add` 会自动写入。初次设置后，也可通过 pi 的 `/login` 命令更新已有 provider 的密钥。
 
-1. **配置同步** — 读取已存储的密钥和基础 URL，与 `NEWAPI_BASE_URL` 环境变量同步
-2. **费率配置获取** — 从网关获取 `GET /api/ratio_config`（无需认证），读取 NewAPI 的 `model_ratio`、`completion_ratio`、`cache_ratio` 和 `create_cache_ratio` 映射。此步骤为尽力而为——如果失败，费用将报告为 `0`
-3. **模型发现** — 从网关获取 `GET /v1/models`（需要 API Key）
-4. **费率匹配** — 通过三级回退机制将每个模型 ID 与费率配置键匹配：精确匹配 → 不区分大小写匹配 → 前缀匹配。这处理了 NewAPI 不一致的命名（如版本标签、混合大小写）
-5. **模型增强** — 按 `deepseek`、`zai`、`google`、`anthropic`、`minimax`、`moonshotai`、`xiaomi`、`openai`、`vercel-ai-gateway` 的优先级，将发现的模型与内置模型数据匹配。构建查找表时，会跳过 NewAPI 不支持的内置 API（仅保留 `openai-completions`、`openai-responses` 或 `anthropic-messages`）。模型 ID 会通过去除 `provider/` 前缀并转换为小写进行标准化。更靠前的 provider 在同一模型出现在多个来源时优先。增强会填充 `api`、`contextWindow`、`maxTokens`、`reasoning`、`thinkingLevelMap`、`input` 类型和兼容性设置。增强时，`anthropic` 和 `openai` 来源模型的 `supportsDeveloperRole` 设置为 `true`，其他来源设置为 `false`。未知模型使用默认值（`anthropic-messages`、128K 上下文 / 4096 最大输出 token / 仅文本）
-6. **费用计算** — 将 NewAPI 配额转换为每百万 token 的美元价格。基于 NewAPI 公式 `Quota = (Input + Output × CompletionRate) × ModelRate × GroupRate`，其中 `1 USD = 500,000 配额`：
-   - `cost.input     = modelRatio × 2`
-   - `cost.output    = modelRatio × completionRatio × 2`
-   - `cost.cacheRead  = modelRatio × cacheRatio × 2`
-   - `cost.cacheWrite = modelRatio × createCacheRatio × 2`
-7. **后端路由** — 每个注册模型都携带增强后的 `api` 和端点，因此 pi 会通过对应的内置 API 处理器路由，而不是根据模型 ID 前缀猜测
-8. **模型信息模板** — 未知模型（不在内置数据中）会在 `provider-newapi.json` 的 `modelInfo` 中添加模板供手动编辑。当之前未知的模型后来被识别时，模板会自动移除
+`<agentDir>` 默认路径：
 
-### 优雅降级
+| 系统 | 路径 |
+|---|---|
+| Linux / macOS | `~/.pi/agent` |
+| Windows | `%USERPROFILE%\.pi\agent` |
 
-如果模型发现失败（网络错误、认证失败等），provider 会回退到**未配置**状态：
+### 配置无效时的处理
 
-- 注册一个占位模型 `newapi/unconfigured`
-- 如果 `auth.json` 中存在 API Key，提示用户运行 `/reload` 然后 `/model`
-- 如果不存在 API Key，提示用户运行 `/login`
+若 `provider-newapi.json` 无法解析或格式不符，扩展会将其备份为 `provider-newapi.json.bak`，以空配置启动，并打印警告。使用 `/newapi-provider-add` 重新配置即可。
 
-这确保 pi 在启动时永远不会崩溃——它始终呈现一个可用的（尽管处于非活动状态的）provider。
+## 多 provider 示例
 
-## 系统要求
+```json
+{
+  "providers": {
+    "internal": {
+      "baseUrl": "https://ai.corp.internal",
+      "modelOverrides": {}
+    },
+    "personal": {
+      "baseUrl": "https://my-newapi.fly.dev",
+      "modelOverrides": {}
+    }
+  },
+  "settings": {}
+}
+```
 
-- [pi](https://github.com/earendil-works/pi-coding-agent) 编码代理
-- NewAPI 网关
-- 如需费用追踪：网关设置 → 运营 → 费率中的 `ExposeRatioEnabled` 必须为 `true`
-- 通过网关访问模型所需的 API Key
-
-## 无 ratio_config 时
-
-如果网关的 `ExposeRatioEnabled` 设置为 `false`，扩展仍然可以正常工作——所有费用将报告为 `0`（使用量追踪已禁用）。模型发现和路由不受影响。
-
-## 许可证
-
-[MIT](LICENSE) © [ttimasdf](https://github.com/ttimasdf)
+两个 provider 的模型均可在 `/model` 中按各自命名空间访问（`internal/<id>`、`personal/<id>`）。
