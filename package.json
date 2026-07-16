@@ -15,5 +15,8 @@
   },
   "pi": {
     "extensions": ["./src/index.ts"]
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
   }
 }
