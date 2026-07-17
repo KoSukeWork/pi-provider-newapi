@@ -1,6 +1,6 @@
 {
   "name": "pi-provider-newapi",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": {
     "name": "ttimasdf",
     "url": "https://github.com/ttimasdf/pi-provider-newapi"
@@ -10,11 +10,15 @@
   "license": "MIT",
   "keywords": ["pi-package", "newapi", "ai-gateway"],
   "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-ai": ">=0.80.8",
     "@earendil-works/pi-coding-agent": ">=0.80.8"
   },
   "pi": {
     "extensions": ["./index.ts"]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test"
   },
   "devDependencies": {
     "typescript": "^7.0.2"
