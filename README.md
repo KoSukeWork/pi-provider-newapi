@@ -43,7 +43,7 @@ Then authenticate with Pi's standard credential flow:
 pi> /login my_gateway
 ```
 
-The provider appears in `/login` even before models are discovered. After login, Pi stores the API key, refreshes the provider catalog, and the models are available immediately:
+The provider appears in `/login` even before models are discovered. After login, Pi stores the API key, refreshes the provider model list, and the models are available immediately:
 
 ```text
 pi> /model my_gateway/claude-sonnet-4-5
@@ -70,17 +70,17 @@ Pi v0.80.8 does not expose credential deletion to extensions. To completely remo
 
 The remove command never edits `auth.json` directly, which keeps the extension compatible with custom Pi credential stores.
 
-## Model refresh and offline catalogs
+## Model list refresh and offline model lists
 
 NewAPI discovery is implemented as Pi's dynamic provider refresh callback:
 
-- Opening `/model` refreshes configured NewAPI catalogs in the background.
-- `pi update --models` forces a catalog refresh.
-- Successful catalogs are stored per provider in Pi's `<agentDir>/models-store.json`.
-- In offline mode, Pi restores the last successful catalog without making NewAPI requests.
-- A failed refresh retains the last good cached catalog. The optional `/api/ratio_config` endpoint is best-effort; `/v1/models` is required for a fresh catalog.
+- Opening `/model` refreshes configured NewAPI model lists in the background. After changing `settings.sendSessionAffinityHeaders` or other extension configuration, open `/model` to apply it to the refreshed model list.
+- `pi update --models` forces an immediate model-list refresh; use it instead when you need the updated model configuration without waiting for the background refresh.
+- Successful model lists are stored per provider in Pi's `<agentDir>/models-store.json`.
+- In offline mode, Pi restores the last successful model list without making NewAPI requests.
+- A failed refresh retains the last good cached model list. The optional `/api/ratio_config` endpoint is best-effort; `/v1/models` is required for a fresh model list.
 
-No API key is included in the catalog cache.
+No API key is included in the model-list cache.
 
 ## Configuration
 
@@ -107,7 +107,8 @@ Gateway configuration is stored at `<agentDir>/extensions/provider-newapi.json`:
     }
   },
   "settings": {
-    "onboardingWarnCountdown": 3
+    "onboardingWarnCountdown": 3,
+    "sendSessionAffinityHeaders": true
   }
 }
 ```
@@ -115,6 +116,7 @@ Gateway configuration is stored at `<agentDir>/extensions/provider-newapi.json`:
 - **`providers`** — one entry per NewAPI instance. The map key is the Pi provider ID.
 - **`modelOverrides`** — metadata for unknown models or patches over known built-in metadata. For a known (enriched) model, only the fields you specify are overridden; the rest keep their built-in values, so a partial entry like `{ "reasoning": true }` is valid. Unknown models receive a generated template after a successful discovery; edit it as necessary.
 - **`settings.onboardingWarnCountdown`** — internal state that limits the no-provider reminder to three startups.
+- **`settings.sendSessionAffinityHeaders`** — when not `false`, adds Pi's session-affinity compatibility option to all discovered `openai-completions` and `anthropic-messages` models. This helps gateways route cache-enabled requests from a session to the same backend. Defaults to `true`. `openai-responses` already sends its session-affinity data for cache-enabled requests.
 
 `<agentDir>` normally resolves to:
 
@@ -134,4 +136,4 @@ Models from each gateway remain separate in Pi's model selector:
 /model personal/gpt-4o
 ```
 
-Each provider has independent configuration, Pi credential, and cached catalog.
+Each provider has independent configuration, Pi credential, and cached model list.

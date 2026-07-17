@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Provider-scoped catalog persistence in Pi's `models-store.json`, offline catalog restoration, and abort-aware NewAPI requests.
 - Atomic, serialized configuration updates so concurrently discovered unknown-model templates do not erase other provider entries.
 - Deterministic unit tests for ratio matching, cost conversion, defensive response parsing, and model construction, plus `typecheck` and `test` npm scripts.
+- Added `settings.sendSessionAffinityHeaders` to opt discovered OpenAI Chat Completions and Anthropic Messages models into Pi session-affinity headers. OpenAI Responses models retain their built-in cache-enabled session-affinity behavior.
 
 ### Changed
 
