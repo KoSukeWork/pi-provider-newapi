@@ -1,29 +1,41 @@
 /**
- * NewAPI Provider Extension for pi
+ * NewAPI Provider Extension for pi (v0.80.8+)
  *
  * Manages multiple named providers backed by self-hosted NewAPI AI gateways.
- * On startup, each provider defined in provider-newapi.json is discovered,
- * enriched, and registered with pi. No providers are registered if the config
- * is empty — run /newapi-provider-add to get started.
+ * Each provider defined in provider-newapi.json is registered with an initial
+ * empty catalog plus a dynamic `refreshModels(context)` callback. Pi owns the
+ * API key (via /login) and drives discovery through its model runtime, so the
+ * extension never reads or mutates credentials directly.
  *
  * Config:   <agentDir>/extensions/provider-newapi.json
  *           { providers: { <name>: { baseUrl, modelOverrides } }, settings: { ... } }
- * Keys:     <agentDir>/auth.json  (one entry per provider name, managed by /newapi-provider-add)
+ * Keys:     owned by Pi's credential store (normally <agentDir>/auth.json).
+ *           Enter/update via `/login <name>`; remove via `/logout <name>`.
  *
  * Commands:
- *   /newapi-provider-add [name]    — add and verify a new provider interactively
- *   /newapi-provider-remove [name] — remove a provider (config + credentials + unregister)
+ *   /newapi-provider-add [name]    — add a gateway config and register it
+ *   /newapi-provider-remove [name] — remove a gateway config and unregister it
  *   /newapi-provider-list          — list configured providers and their status
  */
 
-import { type Api, type Model, type ModelThinkingLevel, type ThinkingLevelMap } from "@earendil-works/pi-ai";
+import {
+	type Api,
+	type Model,
+	type ModelThinkingLevel,
+	type RefreshModelsContext,
+	type ThinkingLevelMap,
+} from "@earendil-works/pi-ai";
 import {
 	getModels,
 	getProviders,
 	type BuiltinProvider,
 } from "@earendil-works/pi-ai/compat";
-import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	getAgentDir,
+	type ExtensionAPI,
+	type ProviderModelConfig,
+} from "@earendil-works/pi-coding-agent";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -44,6 +56,23 @@ const SUPPORTED_NEWAPI_MODEL_APIS = new Set<Api>([
 	"openai-responses",
 ]);
 
+/**
+ * NewAPI advertises the endpoint types it serves for each model in
+ * `supported_endpoint_types` (e.g. ["anthropic", "openai"]). Map each endpoint
+ * type to the Pi model APIs it can drive.
+ */
+const ENDPOINT_TYPE_TO_APIS: Record<string, readonly Api[]> = {
+	anthropic: ["anthropic-messages"],
+	openai: ["openai-completions", "openai-responses"],
+};
+
+/** Preferred order when a gateway advertises several usable APIs for a model. */
+const API_PREFERENCE: readonly Api[] = [
+	"anthropic-messages",
+	"openai-responses",
+	"openai-completions",
+];
+
 const ENRICHMENT_PROVIDERS = [
 	"deepseek",
 	"zai",
@@ -58,41 +87,79 @@ const ENRICHMENT_PROVIDERS = [
 ] as const;
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Errors — distinguish cancellation / timeout / auth / http / payload
 // ---------------------------------------------------------------------------
 
-async function fetchWithTimeout(
-	url: string,
-	options: RequestInit & { timeoutMs?: number } = {},
-): Promise<Response> {
-	const { timeoutMs = FETCH_TIMEOUT_MS, ...fetchOptions } = options;
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), timeoutMs);
-	try {
-		return await fetch(url, { ...fetchOptions, signal: controller.signal });
-	} catch (err) {
-		if ((err as Error).name === "AbortError") {
-			throw new Error(`fetch(${url}) timed out after ${timeoutMs / 1000}s`);
-		}
-		throw err;
-	} finally {
-		clearTimeout(timer);
+type NewAPIErrorCode = "aborted" | "timeout" | "auth" | "http" | "payload" | "network";
+
+class NewAPIError extends Error {
+	readonly code: NewAPIErrorCode;
+
+	constructor(code: NewAPIErrorCode, message: string) {
+		super(message);
+		this.name = "NewAPIError";
+		this.code = code;
 	}
 }
 
-function joinBaseUrl(base: string, path: string): string {
-	return `${base.replace(/\/+$/, "")}${path}`;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch with a local timeout that also honors an upstream abort signal (e.g.
+ * Pi's /model refresh or forced-refresh cancellation). The two signals are
+ * combined so either one aborts the request.
+ */
+async function fetchWithTimeout(
+	url: string,
+	options: RequestInit & { timeoutMs?: number; signal?: AbortSignal | null } = {},
+): Promise<Response> {
+	const { timeoutMs = FETCH_TIMEOUT_MS, signal: upstream, ...fetchOptions } = options;
+
+	if (upstream?.aborted) {
+		throw new NewAPIError("aborted", `fetch(${url}) aborted before start`);
+	}
+
+	const timeoutController = new AbortController();
+	const timer = setTimeout(() => timeoutController.abort(), timeoutMs);
+
+	const signals: AbortSignal[] = [timeoutController.signal];
+	if (upstream) signals.push(upstream);
+	const combined =
+		typeof AbortSignal.any === "function" ? AbortSignal.any(signals) : timeoutController.signal;
+
+	// Bridge: if AbortSignal.any is unavailable, forward the upstream abort.
+	let bridge: (() => void) | undefined;
+	if (typeof AbortSignal.any !== "function" && upstream) {
+		bridge = () => timeoutController.abort();
+		upstream.addEventListener("abort", bridge, { once: true });
+	}
+
+	try {
+		return await fetch(url, { ...fetchOptions, signal: combined });
+	} catch (err) {
+		if (upstream?.aborted) {
+			throw new NewAPIError("aborted", `fetch(${url}) cancelled`);
+		}
+		if (timeoutController.signal.aborted) {
+			throw new NewAPIError("timeout", `fetch(${url}) timed out after ${timeoutMs / 1000}s`);
+		}
+		throw new NewAPIError(
+			"network",
+			`fetch(${url}) failed: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	} finally {
+		clearTimeout(timer);
+		if (bridge && upstream) upstream.removeEventListener("abort", bridge);
+	}
 }
 
-function isSupportedNewAPIModelApi(api: Api): boolean {
-	return SUPPORTED_NEWAPI_MODEL_APIS.has(api);
-}
-
-function resolveApiBaseUrl(baseUrl: string, api: Api): string {
+export function resolveApiBaseUrl(baseUrl: string, api: Api): string {
 	switch (api) {
 		case "openai-completions":
 		case "openai-responses":
-			return joinBaseUrl(baseUrl, "/v1");
+			return `${baseUrl.replace(/\/+$/, "")}/v1`;
 		default:
 			return baseUrl;
 	}
@@ -104,10 +171,10 @@ function resolveApiBaseUrl(baseUrl: string, api: Api): string {
 
 interface NewAPIModelInfo {
 	api?: Api;
-	reasoning: boolean;
-	input: ("text" | "image")[];
-	contextWindow: number;
-	maxTokens: number;
+	reasoning?: boolean;
+	input?: ("text" | "image")[];
+	contextWindow?: number;
+	maxTokens?: number;
 	thinkingLevelMap?: Partial<Record<ModelThinkingLevel, string | null>>;
 }
 
@@ -193,13 +260,7 @@ function invalidateConfig(configPath: string, raw: string): void {
 	// Reset the original to a valid empty config so the next startup doesn't
 	// hit the same validation error again.
 	try {
-		const dir = dirname(configPath);
-		if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-		writeFileSync(
-			configPath,
-			JSON.stringify({ providers: {}, settings: {} }, null, 2),
-			"utf-8",
-		);
+		writeConfigAtomic({ providers: {}, settings: {} });
 	} catch (err) {
 		console.warn(
 			`NewAPI: could not reset config file: ${err instanceof Error ? err.message : String(err)}`,
@@ -207,23 +268,33 @@ function invalidateConfig(configPath: string, raw: string): void {
 	}
 }
 
-function writeConfig(config: NewAPIConfig): void {
+/** Atomic write: serialize to a temp file, then rename over the target. */
+function writeConfigAtomic(config: NewAPIConfig): void {
 	const configPath = getConfigPath();
 	const dir = dirname(configPath);
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-	writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+	const tmpPath = `${configPath}.tmp.${process.pid}.${Date.now()}`;
+	writeFileSync(tmpPath, JSON.stringify(config, null, 2), "utf-8");
+	renameSync(tmpPath, configPath);
 }
 
-function readAuthKey(providerName: string): string {
-	try {
-		const authPath = join(getAgentDir(), "auth.json");
-		const data = JSON.parse(readFileSync(authPath, "utf-8")) as Record<string, unknown>;
-		const cred = data[providerName] as Record<string, unknown> | undefined;
-		if (cred?.type === "api_key" && typeof cred.key === "string") return cred.key;
-	} catch {
-		// auth.json may not exist yet — not an error
-	}
-	return "";
+/**
+ * Serialized read-modify-write of the config file. Concurrent refreshes each
+ * re-read the latest config before merging their own changes, so no provider
+ * entry is lost. The mutator returns `true` when it changed something.
+ */
+let configWriteQueue: Promise<void> = Promise.resolve();
+
+function updateConfig(mutator: (config: NewAPIConfig) => boolean): Promise<void> {
+	const run = configWriteQueue.then(async () => {
+		const config = readConfig();
+		if (mutator(config)) {
+			writeConfigAtomic(config);
+		}
+	});
+	// Keep the queue alive even if one update rejects.
+	configWriteQueue = run.catch(() => {});
+	return run;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,15 +305,15 @@ function readAuthKey(providerName: string): string {
 //   1 USD = 500,000 quota points
 // ---------------------------------------------------------------------------
 
-function calcInputCost(modelRate: number): number {
+export function calcInputCost(modelRate: number): number {
 	return modelRate * DEFAULT_GROUP_RATE * (TOKENS_PER_COST / QUOTA_PER_USD);
 }
 
-function calcOutputCost(modelRate: number, completionRate: number): number {
+export function calcOutputCost(modelRate: number, completionRate: number): number {
 	return modelRate * completionRate * DEFAULT_GROUP_RATE * (TOKENS_PER_COST / QUOTA_PER_USD);
 }
 
-function calcCacheCost(modelRate: number, ratio: number): number {
+export function calcCacheCost(modelRate: number, ratio: number): number {
 	return modelRate * ratio * DEFAULT_GROUP_RATE * (TOKENS_PER_COST / QUOTA_PER_USD);
 }
 
@@ -251,7 +322,7 @@ function calcCacheCost(modelRate: number, ratio: number): number {
 // casing than ratio_config keys.
 // ---------------------------------------------------------------------------
 
-function findRatio(modelId: string, ratios: Record<string, number>): number | undefined {
+export function findRatio(modelId: string, ratios: Record<string, number>): number | undefined {
 	if (modelId in ratios) return ratios[modelId];
 	const lower = modelId.toLowerCase();
 	for (const [key, val] of Object.entries(ratios)) {
@@ -266,6 +337,9 @@ function findRatio(modelId: string, ratios: Record<string, number>): number | un
 // ---------------------------------------------------------------------------
 // Model enrichment — build a lookup keyed by stripped/normalised model ID.
 // Earlier providers in ENRICHMENT_PROVIDERS take precedence.
+//
+// The lookup only depends on Pi's built-in catalog, which is immutable for the
+// life of the process, so it is built once and reused across provider refreshes.
 // ---------------------------------------------------------------------------
 
 interface ModelLookupItem {
@@ -273,22 +347,11 @@ interface ModelLookupItem {
 	source: string;
 }
 
-interface EnrichedModel {
-	id: string;
-	name: string;
-	provider: string;
-	reasoning: boolean;
-	thinkingLevelMap?: ThinkingLevelMap;
-	input: ("text" | "image")[];
-	cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
-	contextWindow: number;
-	maxTokens: number;
-	api: Api;
-	compat?: Model<Api>["compat"];
-	modelInfoSource: string;
-}
+let cachedEnrichmentLookup: Map<string, ModelLookupItem> | undefined;
 
-function buildEnrichmentLookup(): Map<string, ModelLookupItem> {
+function getEnrichmentLookup(): Map<string, ModelLookupItem> {
+	if (cachedEnrichmentLookup) return cachedEnrichmentLookup;
+
 	const lookup = new Map<string, ModelLookupItem>();
 
 	for (const provider of ENRICHMENT_PROVIDERS) {
@@ -300,7 +363,7 @@ function buildEnrichmentLookup(): Map<string, ModelLookupItem> {
 		}
 
 		for (const m of providerModels) {
-			if (!isSupportedNewAPIModelApi(m.api)) continue;
+			if (!SUPPORTED_NEWAPI_MODEL_APIS.has(m.api)) continue;
 
 			const stripped = m.id.includes("/") ? m.id.slice(m.id.indexOf("/") + 1) : m.id;
 			const normalizedId = stripped.replaceAll(".", "-").toLowerCase();
@@ -318,152 +381,196 @@ function buildEnrichmentLookup(): Map<string, ModelLookupItem> {
 		}
 	}
 
+	cachedEnrichmentLookup = lookup;
 	return lookup;
 }
 
 // ---------------------------------------------------------------------------
-// NewAPI response types
+// NewAPI response types + defensive parsing
 // ---------------------------------------------------------------------------
 
-interface OpenAIModelEntry {
+interface NewAPIModelEntry {
+	/** Model ID, e.g. "claude-opus-4-7". */
 	id: string;
-	object: "model";
-	created: number;
-	owned_by: string;
+	/** Upstream owner label reported by the gateway, e.g. "google gemini". */
+	ownedBy?: string;
+	/** Endpoint types the gateway serves for this model, e.g. ["anthropic", "openai"]. */
+	supportedEndpointTypes: string[];
 }
 
-interface OpenAIModelsResponse {
-	object: "list";
-	data: OpenAIModelEntry[];
+interface Ratios {
+	modelRatios: Record<string, number>;
+	completionRatios: Record<string, number>;
+	cacheRatios: Record<string, number>;
+	createCacheRatios: Record<string, number>;
 }
 
-interface RatioConfigResponse {
-	success: boolean;
-	data: {
-		model_ratio: Record<string, number>;
-		completion_ratio: Record<string, number>;
-		cache_ratio: Record<string, number>;
-		create_cache_ratio: Record<string, number>;
+const EMPTY_RATIOS: Ratios = {
+	modelRatios: {},
+	completionRatios: {},
+	cacheRatios: {},
+	createCacheRatios: {},
+};
+
+/** Parse a /v1/models payload defensively into NewAPI model entries. */
+export function parseModelsResponse(json: unknown): NewAPIModelEntry[] {
+	if (typeof json !== "object" || json === null) {
+		throw new NewAPIError("payload", "/v1/models returned a non-object payload");
+	}
+	const data = (json as Record<string, unknown>).data;
+	if (!Array.isArray(data)) {
+		throw new NewAPIError("payload", "/v1/models payload has no data array");
+	}
+	const out: NewAPIModelEntry[] = [];
+	for (const item of data) {
+		if (!item || typeof item !== "object") continue;
+		const rec = item as Record<string, unknown>;
+		if (typeof rec.id !== "string") continue;
+		out.push({
+			id: rec.id,
+			ownedBy: typeof rec.owned_by === "string" ? rec.owned_by : undefined,
+			supportedEndpointTypes: Array.isArray(rec.supported_endpoint_types)
+				? rec.supported_endpoint_types.filter((t): t is string => typeof t === "string")
+				: [],
+		});
+	}
+	return out;
+}
+
+function asRatioMap(value: unknown): Record<string, number> {
+	if (typeof value !== "object" || value === null) return {};
+	const out: Record<string, number> = {};
+	for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+		if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+	}
+	return out;
+}
+
+/** Parse a /api/ratio_config payload defensively. Returns empty maps on any issue. */
+export function parseRatioConfig(json: unknown): Ratios {
+	if (typeof json !== "object" || json === null) return EMPTY_RATIOS;
+	const root = json as Record<string, unknown>;
+	if (root.success === false) return EMPTY_RATIOS;
+	const data = (root.data ?? root) as Record<string, unknown>;
+	return {
+		modelRatios: asRatioMap(data.model_ratio),
+		completionRatios: asRatioMap(data.completion_ratio),
+		cacheRatios: asRatioMap(data.cache_ratio),
+		createCacheRatios: asRatioMap(data.create_cache_ratio),
 	};
 }
 
 // ---------------------------------------------------------------------------
-// Core: fetch models from a NewAPI gateway, enrich them, and register with pi.
-// Returns the number of models registered.
-// Throws on unrecoverable errors (e.g. /v1/models request fails).
+// Pure model construction — turns raw model IDs + ratios + config into the
+// provider model definitions Pi expects. Produces any newly-generated
+// unknown-model override templates as a separate map so the caller can merge
+// them into config atomically.
 // ---------------------------------------------------------------------------
 
-async function discoverAndRegister(
-	pi: ExtensionAPI,
-	name: string,
-	entry: ProviderEntry,
-	config: NewAPIConfig,
-): Promise<number> {
-	const baseUrl = entry.baseUrl.replace(/\/+$/, "");
-	const apiKey = readAuthKey(name);
+interface BuildModelsResult {
+	models: ProviderModelConfig[];
+	newOverrides: Record<string, NewAPIModelInfo>;
+}
 
-	// ratio_config — best-effort, no auth required on most instances
-	let modelRatios: Record<string, number> = {};
-	let completionRatios: Record<string, number> = {};
-	let cacheRatios: Record<string, number> = {};
-	let createCacheRatios: Record<string, number> = {};
-
-	try {
-		const ratioRes = await fetchWithTimeout(`${baseUrl}/api/ratio_config`);
-		if (ratioRes.ok) {
-			const ratioJson = (await ratioRes.json()) as RatioConfigResponse;
-			if (ratioJson.success) {
-				modelRatios = ratioJson.data.model_ratio ?? {};
-				completionRatios = ratioJson.data.completion_ratio ?? {};
-				cacheRatios = ratioJson.data.cache_ratio ?? {};
-				createCacheRatios = ratioJson.data.create_cache_ratio ?? {};
-			}
-		}
-	} catch (err) {
-		console.warn(
-			`NewAPI [${name}]: /api/ratio_config unavailable — ${err instanceof Error ? err.message : String(err)}`,
-		);
+/** Resolve the set of supported model APIs the gateway advertises for a model. */
+function gatewayApisFor(entry: NewAPIModelEntry): Set<Api> {
+	const apis = new Set<Api>();
+	for (const type of entry.supportedEndpointTypes) {
+		for (const api of ENDPOINT_TYPE_TO_APIS[type] ?? []) apis.add(api);
 	}
+	return apis;
+}
 
-	// /v1/models — required; throw on failure so the startup loop can skip this provider
-	const fetchHeaders: Record<string, string> = {};
-	if (apiKey) fetchHeaders["Authorization"] = `Bearer ${apiKey}`;
-
-	const modelsRes = await fetchWithTimeout(`${baseUrl}/v1/models`, { headers: fetchHeaders });
-	if (!modelsRes.ok) {
-		throw new Error(`GET /v1/models: ${modelsRes.status} ${modelsRes.statusText}`);
+/**
+ * Choose a model API. A caller-preferred API (from built-in enrichment or a
+ * configured override) is kept when the gateway advertises it, or when the
+ * gateway advertised nothing usable. Otherwise the best gateway-advertised API
+ * is used, falling back to the default.
+ */
+function pickModelApi(preferred: Api | undefined, gatewayApis: Set<Api>): Api {
+	if (preferred && (gatewayApis.size === 0 || gatewayApis.has(preferred))) {
+		return preferred;
 	}
-
-	const modelsJson = (await modelsRes.json()) as OpenAIModelsResponse;
-	const apiModels = modelsJson.data ?? [];
-
-	if (apiModels.length === 0) {
-		console.warn(
-			`NewAPI [${name}]: /v1/models returned zero models — ` +
-				"the gateway may have no models assigned or the API key may lack access.",
-		);
+	for (const api of API_PREFERENCE) {
+		if (gatewayApis.has(api)) return api;
 	}
+	return preferred ?? DEFAULT_MODEL_API;
+}
 
-	const enrichmentLookup = buildEnrichmentLookup();
-	const modelOverrides = entry.modelOverrides ?? {};
-	let configDirty = false;
-	const modelConfigMap = new Map<string, EnrichedModel>();
+export function buildProviderModels(params: {
+	providerName: string;
+	baseUrl: string;
+	apiModels: NewAPIModelEntry[];
+	ratios: Ratios;
+	modelOverrides: Record<string, NewAPIModelInfo>;
+}): BuildModelsResult {
+	const { providerName, baseUrl, apiModels, ratios, modelOverrides } = params;
+	const enrichmentLookup = getEnrichmentLookup();
+	const newOverrides: Record<string, NewAPIModelInfo> = {};
+	const models: ProviderModelConfig[] = [];
 
 	for (const m of apiModels) {
 		const normalizedId = m.id.replaceAll(".", "-").toLowerCase();
 		const enriched = enrichmentLookup.get(normalizedId);
+		const gatewayApis = gatewayApisFor(m);
 
+		let name = m.id;
 		let reasoning: boolean;
 		let thinkingLevelMap: ThinkingLevelMap | undefined;
 		let input: ("text" | "image")[];
 		let contextWindow: number;
 		let maxTokens: number;
 		let api: Api;
+		let compat: Model<Api>["compat"] | undefined;
 
 		if (enriched) {
-			// Start from enriched built-in values
+			name = enriched.model.name ?? m.id;
+			compat = enriched.model.compat;
 			reasoning = enriched.model.reasoning;
 			thinkingLevelMap = enriched.model.thinkingLevelMap;
 			input = enriched.model.input;
 			contextWindow = enriched.model.contextWindow;
 			maxTokens = enriched.model.maxTokens;
-			if (enriched.model.api) {
-				api = enriched.model.api;
-			} else {
-				api = DEFAULT_MODEL_API;
-				console.warn(
-					`NewAPI [${name}]: enriched model "${m.id}" from ${enriched.source} has no api — ` +
-						`falling back to ${DEFAULT_MODEL_API}`,
-				);
-			}
 
-			// Apply modelOverrides patch on top (optional api/thinkingLevelMap only when
-			// explicitly set; required fields always applied when the entry is present)
-			if (modelOverrides[m.id]) {
-				const mi = modelOverrides[m.id];
-				if (mi.api !== undefined) api = mi.api;
-				reasoning = mi.reasoning;
-				input = mi.input;
-				contextWindow = mi.contextWindow;
-				maxTokens = mi.maxTokens;
+			// Apply the configured override patch on top of built-in metadata.
+			// Only fields present in the override JSON are applied; everything
+			// else keeps its enriched value.
+			const mi = modelOverrides[m.id];
+			if (mi) {
+				if (mi.reasoning !== undefined) reasoning = mi.reasoning;
+				if (mi.input !== undefined) input = mi.input;
+				if (mi.contextWindow !== undefined) contextWindow = mi.contextWindow;
+				if (mi.maxTokens !== undefined) maxTokens = mi.maxTokens;
 				if (mi.thinkingLevelMap !== undefined) thinkingLevelMap = mi.thinkingLevelMap;
 			}
+
+			// A configured override api wins; otherwise use the enriched api. Either
+			// way, prefer an API the gateway actually serves for this model.
+			const preferredApi = mi?.api ?? enriched.model.api;
+			api = pickModelApi(preferredApi, gatewayApis);
+			if (preferredApi === undefined && gatewayApis.size === 0) {
+				console.warn(
+					`NewAPI [${providerName}]: enriched model "${m.id}" from ${enriched.source} has no api ` +
+						`and the gateway advertised none — falling back to ${api}`,
+				);
+			}
 		} else {
-			// Unknown model — use existing override or create a template entry
-			if (!modelOverrides[m.id]) {
-				modelOverrides[m.id] = {
-					api: DEFAULT_MODEL_API,
+			// Unknown model — use an existing override, or generate a template whose
+			// default api reflects the gateway's advertised endpoints.
+			let mi = modelOverrides[m.id];
+			if (!mi) {
+				mi = {
+					api: pickModelApi(undefined, gatewayApis),
 					reasoning: false,
 					input: ["text"],
 					contextWindow: 128000,
 					maxTokens: 4096,
 				};
-				configDirty = true;
+				newOverrides[m.id] = mi;
 				console.warn(
-					`NewAPI [${name}]: unknown model "${m.id}" — template added to modelOverrides`,
+					`NewAPI [${providerName}]: unknown model "${m.id}" — template added to modelOverrides`,
 				);
 			}
-			const mi = modelOverrides[m.id];
 			reasoning = mi.reasoning ?? false;
 			thinkingLevelMap = mi.thinkingLevelMap;
 			input = mi.input ?? ["text"];
@@ -472,16 +579,16 @@ async function discoverAndRegister(
 			api = mi.api ?? DEFAULT_MODEL_API;
 		}
 
-		const mr = findRatio(m.id, modelRatios) ?? 0;
-		const cr = findRatio(m.id, completionRatios) ?? 1;
-		const cacheR = findRatio(m.id, cacheRatios) ?? 0;
-		const createCacheR = findRatio(m.id, createCacheRatios) ?? 0;
+		const mr = findRatio(m.id, ratios.modelRatios) ?? 0;
+		const cr = findRatio(m.id, ratios.completionRatios) ?? 1;
+		const cacheR = findRatio(m.id, ratios.cacheRatios) ?? 0;
+		const createCacheR = findRatio(m.id, ratios.createCacheRatios) ?? 0;
 
-		modelConfigMap.set(m.id, {
+		models.push({
 			id: m.id,
-			name: enriched?.model.name ?? m.id,
-			provider: enriched?.model.provider ?? name,
-			modelInfoSource: enriched ? `built-in:${enriched.source}` : "config:modelOverrides",
+			name,
+			api,
+			baseUrl: resolveApiBaseUrl(baseUrl, api),
 			reasoning,
 			thinkingLevelMap,
 			input,
@@ -493,70 +600,183 @@ async function discoverAndRegister(
 			},
 			contextWindow,
 			maxTokens,
-			api,
-			compat: enriched?.model.compat,
+			compat,
 		});
 	}
 
-	if (configDirty) {
-		entry.modelOverrides = modelOverrides;
-		writeConfig(config);
+	return { models, newOverrides };
+}
+
+// ---------------------------------------------------------------------------
+// Network discovery — fetch ratio config (best-effort) and /v1/models
+// (required). Returns provider model definitions; never registers a provider.
+// ---------------------------------------------------------------------------
+
+async function discoverModels(
+	providerName: string,
+	entry: ProviderEntry,
+	apiKey: string | undefined,
+	signal: AbortSignal | undefined,
+): Promise<BuildModelsResult> {
+	const baseUrl = entry.baseUrl.replace(/\/+$/, "");
+
+	// ratio_config — best-effort; failure or malformed payload → empty ratios.
+	let ratios: Ratios = EMPTY_RATIOS;
+	try {
+		const ratioRes = await fetchWithTimeout(`${baseUrl}/api/ratio_config`, { signal });
+		if (ratioRes.ok) {
+			ratios = parseRatioConfig(await ratioRes.json());
+		}
+	} catch (err) {
+		if (err instanceof NewAPIError && err.code === "aborted") throw err;
+		console.warn(
+			`NewAPI [${providerName}]: /api/ratio_config unavailable — ${err instanceof Error ? err.message : String(err)}`,
+		);
 	}
 
-	const providerModels = Array.from(modelConfigMap.values(), (m) => ({
-		id: m.id,
-		name: m.name,
-		api: m.api,
-		baseUrl: resolveApiBaseUrl(baseUrl, m.api),
-		reasoning: m.reasoning,
-		thinkingLevelMap: m.thinkingLevelMap,
-		input: m.input,
-		cost: m.cost,
-		contextWindow: m.contextWindow,
-		maxTokens: m.maxTokens,
-		compat: m.compat,
-	}));
+	// /v1/models — required for a fresh network result.
+	const headers: Record<string, string> = {};
+	if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
-	pi.registerProvider(name, {
+	const modelsRes = await fetchWithTimeout(`${baseUrl}/v1/models`, { headers, signal });
+	if (modelsRes.status === 401 || modelsRes.status === 403) {
+		throw new NewAPIError(
+			"auth",
+			`GET /v1/models: ${modelsRes.status} ${modelsRes.statusText} — check the API key`,
+		);
+	}
+	if (!modelsRes.ok) {
+		throw new NewAPIError("http", `GET /v1/models: ${modelsRes.status} ${modelsRes.statusText}`);
+	}
+
+	const apiModels = parseModelsResponse(await modelsRes.json());
+
+	return buildProviderModels({
+		providerName,
 		baseUrl,
-		apiKey,
-		models: providerModels,
+		apiModels,
+		ratios,
+		modelOverrides: entry.modelOverrides ?? {},
 	});
-
-	return providerModels.length;
 }
 
 // ---------------------------------------------------------------------------
-// Onboarding nudge — shown at most ONBOARDING_WARN_MAX times when zero
-// providers are configured. Countdown is persisted in config.settings.
+// Provider registration + dynamic refresh
 // ---------------------------------------------------------------------------
 
-function maybeWarnOnboarding(config: NewAPIConfig): void {
-	const countdown = config.settings.onboardingWarnCountdown ?? ONBOARDING_WARN_MAX;
-	if (countdown <= 0) return;
+/**
+ * Dynamic refresh callback handed to Pi. Restores the cached catalog offline,
+ * fetches fresh models when network + auth allow, persists successful catalogs
+ * to the provider-scoped store, and retains the last good catalog on failure.
+ */
+async function refreshProviderModels(
+	providerName: string,
+	context: RefreshModelsContext,
+): Promise<ProviderModelConfig[]> {
+	// Always read the latest config so user edits to baseUrl/overrides apply.
+	const config = readConfig();
+	const entry = config.providers[providerName];
+	if (!entry) return [];
 
-	console.warn(
-		"NewAPI: no providers configured. Run /newapi-provider-add to add a NewAPI gateway.",
-	);
+	const cached = await context.store.read();
+	// Round-trip cast: stored models were written as provider model configs.
+	const cachedModels = (cached?.models ?? []) as unknown as ProviderModelConfig[];
 
-	config.settings.onboardingWarnCountdown = countdown - 1;
-	writeConfig(config);
+	// Offline or cancelled: serve cache without touching the network.
+	if (!context.allowNetwork || context.signal?.aborted) {
+		return cachedModels;
+	}
+
+	const credential = context.credential;
+	const apiKey =
+		credential?.type === "api_key" && credential.key ? credential.key : undefined;
+
+	try {
+		const { models, newOverrides } = await discoverModels(
+			providerName,
+			entry,
+			apiKey,
+			context.signal,
+		);
+
+		if (models.length === 0 && cachedModels.length > 0) {
+			// Never replace a good cached catalog with an empty one.
+			console.warn(
+				`NewAPI [${providerName}]: /v1/models returned zero models — keeping cached catalog.`,
+			);
+			return cachedModels;
+		}
+
+		// Merge any newly generated unknown-model templates into config safely.
+		if (Object.keys(newOverrides).length > 0) {
+			await updateConfig((cfg) => {
+				const e = cfg.providers[providerName];
+				if (!e) return false;
+				e.modelOverrides = e.modelOverrides ?? {};
+				let changed = false;
+				for (const [id, info] of Object.entries(newOverrides)) {
+					if (!e.modelOverrides[id]) {
+						e.modelOverrides[id] = info;
+						changed = true;
+					}
+				}
+				return changed;
+			});
+		}
+
+		// Persist the successful catalog for offline restoration. No API key is
+		// ever written to the store.
+		await context.store.write({
+			models: models as unknown as Model<Api>[],
+			checkedAt: Date.now(),
+		});
+
+		return models;
+	} catch (err) {
+		if (err instanceof NewAPIError && err.code === "aborted") {
+			return cachedModels;
+		}
+		console.warn(
+			`NewAPI [${providerName}]: refresh failed — ${err instanceof Error ? err.message : String(err)}` +
+				(cachedModels.length > 0 ? " (serving cached catalog)" : ""),
+		);
+		return cachedModels;
+	}
+}
+
+/**
+ * Register a NewAPI provider once with an empty initial catalog plus a dynamic
+ * refresh callback. The empty catalog is intentional: it declares a new
+ * extension-owned dynamic provider that is immediately selectable in /login so
+ * Pi can bootstrap credential entry, then drive discovery through refreshModels.
+ */
+function registerNewAPIProvider(pi: ExtensionAPI, name: string, entry: ProviderEntry): void {
+	pi.registerProvider(name, {
+		name,
+		baseUrl: entry.baseUrl.replace(/\/+$/, ""),
+		api: DEFAULT_MODEL_API,
+		models: [],
+		async refreshModels(context) {
+			return refreshProviderModels(name, context);
+		},
+	});
 }
 
 // ---------------------------------------------------------------------------
-// Default export — startup loop + commands
+// Default export — startup registration + commands
 // ---------------------------------------------------------------------------
 
 export default async function (pi: ExtensionAPI) {
 	const config = readConfig();
 	const builtinProviderIds = getProviders() as unknown as string[];
 
-	// Track which providers we successfully register this session (used by the
-	// list command and by /newapi-provider-add after live registration).
-	const registered: string[] = [];
+	// Track which providers this session has registered (used by the list
+	// command and by add/remove after live registration).
+	const registered = new Set<string>();
 
 	// -------------------------------------------------------------------------
-	// Startup: discover and register every configured provider
+	// Startup: register every configured provider (no network needed here — Pi
+	// drives discovery via refreshModels).
 	// -------------------------------------------------------------------------
 
 	for (const [name, entry] of Object.entries(config.providers)) {
@@ -566,22 +786,31 @@ export default async function (pi: ExtensionAPI) {
 			);
 			continue;
 		}
-		if (registered.includes(name)) {
+		if (registered.has(name)) {
 			console.warn(`NewAPI: skipping duplicate provider key "${name}" in config.`);
 			continue;
 		}
-		try {
-			const count = await discoverAndRegister(pi, name, entry, config);
-			registered.push(name);
-		} catch (err) {
-			console.warn(
-				`NewAPI [${name}]: discovery failed — ${err instanceof Error ? err.message : String(err)}`,
-			);
+		if (!entry || typeof entry.baseUrl !== "string" || !entry.baseUrl.trim()) {
+			console.warn(`NewAPI: skipping provider "${name}" — missing baseUrl.`);
+			continue;
 		}
+		registerNewAPIProvider(pi, name, entry);
+		registered.add(name);
 	}
 
-	if (registered.length === 0) {
-		maybeWarnOnboarding(config);
+	// Onboarding nudge — shown at most ONBOARDING_WARN_MAX times when zero
+	// providers are configured. Countdown is persisted in config.settings.
+	if (registered.size === 0) {
+		const countdown = config.settings.onboardingWarnCountdown ?? ONBOARDING_WARN_MAX;
+		if (countdown > 0) {
+			console.warn(
+				"NewAPI: no providers configured. Run /newapi-provider-add to add a NewAPI gateway.",
+			);
+			void updateConfig((cfg) => {
+				cfg.settings.onboardingWarnCountdown = countdown - 1;
+				return true;
+			});
+		}
 	}
 
 	// -------------------------------------------------------------------------
@@ -589,7 +818,7 @@ export default async function (pi: ExtensionAPI) {
 	// -------------------------------------------------------------------------
 
 	pi.registerCommand("newapi-provider-add", {
-		description: "Add a new NewAPI provider (prompts for base URL and API key)",
+		description: "Add a new NewAPI provider (prompts for base URL; login via /login)",
 		handler: async (args, ctx) => {
 			// 1. Resolve provider name
 			let name = args.trim();
@@ -618,8 +847,8 @@ export default async function (pi: ExtensionAPI) {
 				return;
 			}
 
-			const config = readConfig();
-			if (config.providers[name]) {
+			const current = readConfig();
+			if (current.providers[name]) {
 				ctx.ui.notify(
 					`Provider "${name}" already exists. Run /newapi-provider-remove "${name}" first.`,
 					"error",
@@ -636,73 +865,40 @@ export default async function (pi: ExtensionAPI) {
 				return;
 			}
 
-			// 4. Prompt API key
-			const apiKey = await ctx.ui.input("API Key", "sk-...");
-			if (apiKey === undefined) return;
-			if (!apiKey.trim()) {
-				ctx.ui.notify("API key cannot be empty.", "error");
-				return;
-			}
-
-			// 5. Verify connectivity + auth before saving anything
+			// 4. Optional unauthenticated reachability check (best-effort). Auth
+			// verification happens later in refreshModels once Pi owns the key.
 			try {
-				const verifyHeaders: Record<string, string> = { "Authorization": `Bearer ${apiKey}` };
-
-				const res = await fetchWithTimeout(`${baseUrl}/v1/models`, {
-					headers: verifyHeaders,
-				});
-
-				if (res.status === 401) {
+				const res = await fetchWithTimeout(`${baseUrl}/v1/models`, { signal: ctx.signal });
+				// 401/403 still means the gateway is reachable — that's fine here.
+				if (!res.ok && res.status !== 401 && res.status !== 403) {
 					ctx.ui.notify(
-						"Authentication failed (401). Check your API key and try again.",
-						"error",
-					);
-					return;
-				}
-				if (!res.ok) {
-					ctx.ui.notify(
-						`Connection failed: ${res.status} ${res.statusText}. Provider not added.`,
-						"error",
-					);
-					return;
-				}
-
-				const json = (await res.json()) as OpenAIModelsResponse;
-				if ((json.data?.length ?? 0) === 0) {
-					ctx.ui.notify(
-						`Connected to "${name}", but /v1/models returned 0 models. ` +
-							"The API key may have limited access. Saving anyway.",
+						`Warning: ${baseUrl} responded ${res.status} ${res.statusText}. Saving anyway.`,
 						"warning",
 					);
 				}
 			} catch (err) {
 				ctx.ui.notify(
-					`Verification failed: ${err instanceof Error ? err.message : String(err)}. Provider not added.`,
-					"error",
-				);
-				return;
-			}
-
-			// 6. Persist — key to auth.json, entry to config
-			ctx.modelRegistry.authStorage.set(name, { type: "api_key", key: apiKey });
-			const entry: ProviderEntry = { baseUrl, modelOverrides: {} };
-			config.providers[name] = entry;
-			writeConfig(config);
-
-			// 7. Discover and register live — no /reload needed
-			try {
-				const count = await discoverAndRegister(pi, name, entry, config);
-				registered.push(name);
-				ctx.ui.notify(
-					`Provider "${name}" added with ${count} model${count !== 1 ? "s" : ""}.`,
-					"info",
-				);
-			} catch (err) {
-				ctx.ui.notify(
-					`Provider "${name}" saved, but model discovery failed: ${err instanceof Error ? err.message : String(err)}`,
+					`Warning: could not reach ${baseUrl} (${err instanceof Error ? err.message : String(err)}). Saving anyway.`,
 					"warning",
 				);
 			}
+
+			// 5. Persist config (no API key — Pi owns credentials).
+			const entry: ProviderEntry = { baseUrl, modelOverrides: {} };
+			await updateConfig((cfg) => {
+				cfg.providers[name] = entry;
+				return true;
+			});
+
+			// 6. Register live so /login <name> is immediately available.
+			registerNewAPIProvider(pi, name, entry);
+			registered.add(name);
+
+			ctx.ui.notify(
+				`Provider "${name}" added. Run /login ${name} to enter its API key; ` +
+					"Pi will then discover its models.",
+				"info",
+			);
 		},
 	});
 
@@ -711,10 +907,10 @@ export default async function (pi: ExtensionAPI) {
 	// -------------------------------------------------------------------------
 
 	pi.registerCommand("newapi-provider-remove", {
-		description: "Remove a configured NewAPI provider",
+		description: "Remove a configured NewAPI provider (run /logout <name> first)",
 		handler: async (args, ctx) => {
-			const config = readConfig();
-			const providerNames = Object.keys(config.providers);
+			const current = readConfig();
+			const providerNames = Object.keys(current.providers);
 
 			if (providerNames.length === 0) {
 				ctx.ui.notify("No NewAPI providers are configured.", "info");
@@ -729,26 +925,39 @@ export default async function (pi: ExtensionAPI) {
 				name = selected;
 			}
 
-			if (!config.providers[name]) {
+			if (!current.providers[name]) {
 				ctx.ui.notify(`Provider "${name}" not found in config.`, "error");
 				return;
 			}
 
+			// Pi v0.80.8 exposes no extension-safe credential deletion, so warn
+			// the user to remove the credential via /logout separately.
+			const status = ctx.modelRegistry.getProviderAuthStatus(name);
+			const credentialNote = status.configured
+				? `A Pi credential is still configured for "${name}". Run /logout ${name} to remove it — ` +
+					"this command does not edit auth.json.\n\n"
+				: "";
+
 			const confirmed = await ctx.ui.confirm(
 				`Remove provider "${name}"?`,
-				`This will unregister "${name}", delete its config entry, and remove its stored credentials.`,
+				`${credentialNote}This will unregister "${name}" and delete its config entry.`,
 			);
 			if (!confirmed) return;
 
 			pi.unregisterProvider(name);
-			delete config.providers[name];
-			writeConfig(config);
-			ctx.modelRegistry.authStorage.remove(name);
+			await updateConfig((cfg) => {
+				if (!cfg.providers[name]) return false;
+				delete cfg.providers[name];
+				return true;
+			});
+			registered.delete(name);
 
-			const idx = registered.indexOf(name);
-			if (idx !== -1) registered.splice(idx, 1);
-
-			ctx.ui.notify(`Provider "${name}" removed.`, "info");
+			ctx.ui.notify(
+				status.configured
+					? `Provider "${name}" removed. Run /logout ${name} to delete its stored credential.`
+					: `Provider "${name}" removed.`,
+				"info",
+			);
 		},
 	});
 
@@ -759,8 +968,8 @@ export default async function (pi: ExtensionAPI) {
 	pi.registerCommand("newapi-provider-list", {
 		description: "List all configured NewAPI providers and their status",
 		handler: async (_args, ctx) => {
-			const config = readConfig();
-			const names = Object.keys(config.providers);
+			const current = readConfig();
+			const names = Object.keys(current.providers);
 
 			if (names.length === 0) {
 				ctx.ui.notify(
@@ -771,13 +980,13 @@ export default async function (pi: ExtensionAPI) {
 			}
 
 			const lines = names.map((name) => {
-				const entry = config.providers[name];
-				const hasKey = ctx.modelRegistry.authStorage.has(name);
+				const entry = current.providers[name];
+				const status = ctx.modelRegistry.getProviderAuthStatus(name);
 				const overrideCount = Object.keys(entry.modelOverrides ?? {}).length;
-				const status = registered.includes(name) ? "active" : "inactive";
+				const state = registered.has(name) ? "active" : "inactive";
 				return (
 					`  ${name}  |  ${entry.baseUrl}  |  ` +
-					`auth: ${hasKey ? "✓" : "✗"}  |  overrides: ${overrideCount}  |  ${status}`
+					`auth: ${status.configured ? "✓" : "✗"}  |  overrides: ${overrideCount}  |  ${state}`
 				);
 			});
 
