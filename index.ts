@@ -572,7 +572,6 @@ export default async function (pi: ExtensionAPI) {
 		}
 		try {
 			const count = await discoverAndRegister(pi, name, entry, config);
-			console.log(`NewAPI [${name}]: registered ${count} model${count !== 1 ? "s" : ""}.`);
 			registered.push(name);
 		} catch (err) {
 			console.warn(
