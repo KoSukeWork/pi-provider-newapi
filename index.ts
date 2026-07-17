@@ -752,7 +752,7 @@ async function refreshProviderModels(
  */
 function registerNewAPIProvider(pi: ExtensionAPI, name: string, entry: ProviderEntry): void {
 	pi.registerProvider(name, {
-		name,
+		name: `NewAPI (${name})`,
 		baseUrl: entry.baseUrl.replace(/\/+$/, ""),
 		api: DEFAULT_MODEL_API,
 		models: [],
