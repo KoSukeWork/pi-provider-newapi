@@ -185,6 +185,7 @@ interface ProviderEntry {
 
 interface Settings {
 	onboardingWarnCountdown?: number;
+	sendSessionAffinityHeaders?: boolean;
 }
 
 interface NewAPIConfig {
@@ -503,8 +504,10 @@ export function buildProviderModels(params: {
 	apiModels: NewAPIModelEntry[];
 	ratios: Ratios;
 	modelOverrides: Record<string, NewAPIModelInfo>;
+	settings?: Settings;
 }): BuildModelsResult {
-	const { providerName, baseUrl, apiModels, ratios, modelOverrides } = params;
+	const { providerName, baseUrl, apiModels, ratios, modelOverrides, settings = {} } = params;
+	const sendSessionAffinityHeaders = settings.sendSessionAffinityHeaders !== false;
 	const enrichmentLookup = getEnrichmentLookup();
 	const newOverrides: Record<string, NewAPIModelInfo> = {};
 	const models: ProviderModelConfig[] = [];
@@ -584,6 +587,19 @@ export function buildProviderModels(params: {
 		const cacheR = findRatio(m.id, ratios.cacheRatios) ?? 0;
 		const createCacheR = findRatio(m.id, ratios.createCacheRatios) ?? 0;
 
+		// OpenAI Responses always sends cache/session-affinity data for
+		// cache-enabled requests. The opt-in compat flag applies only to APIs
+		// that otherwise leave those headers disabled.
+		if (
+			sendSessionAffinityHeaders &&
+			(api === "openai-completions" || api === "anthropic-messages")
+		) {
+			compat = {
+				...(compat as Record<string, unknown> | undefined),
+				sendSessionAffinityHeaders: true,
+			} as Model<Api>["compat"];
+		}
+
 		models.push({
 			id: m.id,
 			name,
@@ -617,6 +633,7 @@ async function discoverModels(
 	entry: ProviderEntry,
 	apiKey: string | undefined,
 	signal: AbortSignal | undefined,
+	settings: Settings,
 ): Promise<BuildModelsResult> {
 	const baseUrl = entry.baseUrl.replace(/\/+$/, "");
 
@@ -657,6 +674,7 @@ async function discoverModels(
 		apiModels,
 		ratios,
 		modelOverrides: entry.modelOverrides ?? {},
+		settings,
 	});
 }
 
@@ -697,6 +715,7 @@ async function refreshProviderModels(
 			entry,
 			apiKey,
 			context.signal,
+			config.settings,
 		);
 
 		if (models.length === 0 && cachedModels.length > 0) {

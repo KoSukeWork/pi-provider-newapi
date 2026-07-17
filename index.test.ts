@@ -154,6 +154,7 @@ test("buildProviderModels: unknown model generates a template override", () => {
 	assert.equal(models[0].api, "anthropic-messages");
 	assert.ok(newOverrides["totally-unknown-model-xyz"]);
 	assert.equal(newOverrides["totally-unknown-model-xyz"].contextWindow, 128000);
+	assert.deepEqual(models[0].compat, { sendSessionAffinityHeaders: true });
 });
 
 test("buildProviderModels: unknown model template api follows supported endpoints", () => {
@@ -235,4 +236,61 @@ test("buildProviderModels: partial override only patches specified fields", () =
 	assert.equal(models[0].contextWindow, base.contextWindow); // preserved from enrichment
 	assert.equal(models[0].maxTokens, base.maxTokens); // preserved from enrichment
 	assert.deepEqual(models[0].input, base.input); // preserved from enrichment
+});
+
+test("buildProviderModels: session affinity is enabled for supported APIs only", () => {
+	const modelOverrides: Record<string, any> = {
+		"openai-compatible": { api: "openai-completions" },
+		"anthropic-compatible": { api: "anthropic-messages" },
+		"responses-compatible": { api: "openai-responses" },
+	};
+	const { models } = buildProviderModels({
+		providerName: "gw",
+		baseUrl: "https://gw.example.com",
+		apiModels: [
+			{ id: "openai-compatible", supportedEndpointTypes: ["openai"] },
+			{ id: "anthropic-compatible", supportedEndpointTypes: ["anthropic"] },
+			{ id: "responses-compatible", supportedEndpointTypes: ["openai"] },
+		],
+		ratios: { modelRatios: {}, completionRatios: {}, cacheRatios: {}, createCacheRatios: {} },
+		modelOverrides,
+		settings: { sendSessionAffinityHeaders: true },
+	});
+
+	assert.deepEqual(models[0].compat, { sendSessionAffinityHeaders: true });
+	assert.deepEqual(models[1].compat, { sendSessionAffinityHeaders: true });
+	assert.equal(models[2].compat, undefined);
+});
+
+test("buildProviderModels: session affinity preserves enriched compatibility", () => {
+	const base = getModels("deepseek")[0];
+	assert.ok(base, "expected at least one built-in deepseek model");
+
+	const { models } = buildProviderModels({
+		providerName: "gw",
+		baseUrl: "https://gw.example.com",
+		apiModels: [{ id: base.id, supportedEndpointTypes: [] }],
+		ratios: { modelRatios: {}, completionRatios: {}, cacheRatios: {}, createCacheRatios: {} },
+		modelOverrides: {},
+		settings: { sendSessionAffinityHeaders: true },
+	});
+
+	assert.deepEqual(models[0].compat, {
+		...base.compat,
+		supportsDeveloperRole: false,
+		sendSessionAffinityHeaders: true,
+	});
+});
+
+test("buildProviderModels: session affinity can be disabled", () => {
+	const { models } = buildProviderModels({
+		providerName: "gw",
+		baseUrl: "https://gw.example.com",
+		apiModels: [{ id: "disabled-affinity", supportedEndpointTypes: [] }],
+		ratios: { modelRatios: {}, completionRatios: {}, cacheRatios: {}, createCacheRatios: {} },
+		modelOverrides: {},
+		settings: { sendSessionAffinityHeaders: false },
+	});
+
+	assert.equal(models[0].compat, undefined);
 });
