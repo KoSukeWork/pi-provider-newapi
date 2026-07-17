@@ -3,11 +3,11 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![pi extension](https://img.shields.io/badge/extension-pi%20provider-green.svg)](https://github.com/ttimasdf/pi-provider-newapi)
 
-[pi](https://github.com/earendil-works/pi) coding agent provider extension for self-hosted [NewAPI](https://github.com/QuantumNous/new-api) AI gateways.
+A [pi](https://github.com/earendil-works/pi) coding-agent provider extension for self-hosted [NewAPI](https://github.com/QuantumNous/new-api) gateways. It requires Pi and `@earendil-works/pi-ai` **v0.80.8 or later**.
 
-Supports **multiple named providers**, each backed by a separate NewAPI instance. On startup, each provider is discovered, enriched from pi's built-in model metadata, and registered. API routing is automatic:
+Multiple named providers are supported, each backed by an independent NewAPI gateway. Discovered models are enriched from Pi's built-in metadata and routed automatically:
 
-| Recommended API | Endpoint |
+| Model API | Endpoint |
 |---|---|
 | `openai-completions`, `openai-responses` | `{baseUrl}/v1` |
 | `anthropic-messages` | `{baseUrl}` |
@@ -26,45 +26,65 @@ Or install from git:
 pi install git:github.com/ttimasdf/pi-provider-newapi
 ```
 
-The extension is auto-discovered via the `pi.extensions` field in `package.json`.
+## Quick start
 
-## Quick Start
+Add a gateway configuration:
 
-Run `/newapi-provider-add` inside a pi session. The command will prompt you for:
-
-1. **Provider name** — an identifier you choose (e.g. `my_gateway`). Must not be an existing built-in pi provider name.
-2. **Base URL** — root URL of your NewAPI instance (e.g. `https://ai.example.com`).
-3. **API Key** — your NewAPI key.
-
-The command verifies connectivity before saving anything. On success it registers the provider immediately — no `/reload` needed.
-
-```
+```text
 pi> /newapi-provider-add my_gateway
 Provider name: my_gateway
 Base URL: https://ai.example.com
-API Key: sk-your-api-key
-✓ Provider "my_gateway" added with 42 models.
+Provider "my_gateway" was added. Run /login my_gateway to enter its API key; Pi will then discover its models.
 ```
 
-You can add as many providers as you like. Each is registered under its own name:
+Then authenticate with Pi's standard credential flow:
 
+```text
+pi> /login my_gateway
 ```
+
+The provider appears in `/login` even before models are discovered. After login, Pi stores the API key, refreshes the provider catalog, and the models are available immediately:
+
+```text
 pi> /model my_gateway/claude-sonnet-4-5
 ```
+
+Do not put an API key in the extension configuration. Pi owns credentials and stores them using its configured credential store (normally `<agentDir>/auth.json`).
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `/newapi-provider-add [name]` | Add a new provider (interactive prompts) |
-| `/newapi-provider-remove [name]` | Remove a provider — unregisters, deletes config + credentials |
-| `/newapi-provider-list` | Show all configured providers with base URL, auth status, and model override count |
+| `/newapi-provider-add [name]` | Add a gateway configuration and register it immediately. Then run `/login <name>`. |
+| `/newapi-provider-remove [name]` | Unregister and remove a gateway configuration. Run `/logout <name>` first to remove its Pi-owned credential. |
+| `/newapi-provider-list` | Show configured providers, credential status, overrides, and active state. |
+
+### Removal workflow
+
+Pi v0.80.8 does not expose credential deletion to extensions. To completely remove a provider, first run:
+
+```text
+/logout my_gateway
+/newapi-provider-remove my_gateway
+```
+
+The remove command never edits `auth.json` directly, which keeps the extension compatible with custom Pi credential stores.
+
+## Model refresh and offline catalogs
+
+NewAPI discovery is implemented as Pi's dynamic provider refresh callback:
+
+- Opening `/model` refreshes configured NewAPI catalogs in the background.
+- `pi update --models` forces a catalog refresh.
+- Successful catalogs are stored per provider in Pi's `<agentDir>/models-store.json`.
+- In offline mode, Pi restores the last successful catalog without making NewAPI requests.
+- A failed refresh retains the last good cached catalog. The optional `/api/ratio_config` endpoint is best-effort; `/v1/models` is required for a fresh catalog.
+
+No API key is included in the catalog cache.
 
 ## Configuration
 
-### Config file
-
-`<agentDir>/extensions/provider-newapi.json`
+Gateway configuration is stored at `<agentDir>/extensions/provider-newapi.json`:
 
 ```json
 {
@@ -92,41 +112,26 @@ pi> /model my_gateway/claude-sonnet-4-5
 }
 ```
 
-- **`providers`** — one entry per NewAPI instance. The key is the provider name pi registers.
-- **`modelOverrides`** — manually supply or override metadata for models not in pi's built-in catalog. The extension auto-populates a template entry for every unknown model it discovers; edit the values as needed. For known models, an entry is retained and applied on top of the enriched built-in metadata.
-- **`settings.onboardingWarnCountdown`** — internal counter; decremented each startup while no providers are configured.
+- **`providers`** — one entry per NewAPI instance. The map key is the Pi provider ID.
+- **`modelOverrides`** — metadata for unknown models or patches over known built-in metadata. For a known (enriched) model, only the fields you specify are overridden; the rest keep their built-in values, so a partial entry like `{ "reasoning": true }` is valid. Unknown models receive a generated template after a successful discovery; edit it as necessary.
+- **`settings.onboardingWarnCountdown`** — internal state that limits the no-provider reminder to three startups.
 
-### Credentials
-
-API keys are stored in pi's standard `<agentDir>/auth.json`, keyed by provider name. `/newapi-provider-add` writes them there automatically. You can also use pi's `/login` command to update an existing provider's key after initial setup.
-
-`<agentDir>` defaults to:
+`<agentDir>` normally resolves to:
 
 | OS | Path |
 |---|---|
 | Linux / macOS | `~/.pi/agent` |
 | Windows | `%USERPROFILE%\.pi\agent` |
 
-### Invalid config
+If the configuration is malformed, it is backed up to `provider-newapi.json.bak` and reset to a valid empty configuration.
 
-If `provider-newapi.json` cannot be parsed or has an unexpected shape, the extension backs it up to `provider-newapi.json.bak`, starts with an empty config, and prints a warning. Use `/newapi-provider-add` to reconfigure.
+## Multiple providers
 
-## Multiple providers example
+Models from each gateway remain separate in Pi's model selector:
 
-```json
-{
-  "providers": {
-    "internal": {
-      "baseUrl": "https://ai.corp.internal",
-      "modelOverrides": {}
-    },
-    "personal": {
-      "baseUrl": "https://my-newapi.fly.dev",
-      "modelOverrides": {}
-    }
-  },
-  "settings": {}
-}
+```text
+/model internal/claude-sonnet-4-5
+/model personal/gpt-4o
 ```
 
-Models from both providers appear in `/model` under their respective provider namespaces (`internal/<id>`, `personal/<id>`).
+Each provider has independent configuration, Pi credential, and cached catalog.

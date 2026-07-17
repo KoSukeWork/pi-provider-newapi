@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning.
 
+## [0.4.0] - 2026-06-06
+
+### Added
+
+- Dynamic NewAPI catalog discovery through Pi v0.80.8 `refreshModels(context)`, including `/model` background refresh and forced `pi update --models` refresh support.
+- Provider-scoped catalog persistence in Pi's `models-store.json`, offline catalog restoration, and abort-aware NewAPI requests.
+- Atomic, serialized configuration updates so concurrently discovered unknown-model templates do not erase other provider entries.
+- Deterministic unit tests for ratio matching, cost conversion, defensive response parsing, and model construction, plus `typecheck` and `test` npm scripts.
+
+### Changed
+
+- Require `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` v0.80.8 or newer.
+- Providers now register immediately with an intentional empty catalog, making `/login <provider>` available before the first model discovery.
+- `/newapi-provider-add` saves only the gateway configuration and directs users through Pi-owned `/login <provider>` credential entry.
+- `/newapi-provider-list` now uses Pi's supported provider authentication status API.
+- Successful model catalogs retain existing enrichment, cost calculation, API routing, configured overrides, and generated unknown-model templates.
+- Model discovery now parses each entry's `owned_by` and `supported_endpoint_types`, and routes models (including generated unknown-model templates) to an API the gateway actually advertises, falling back to enriched/default APIs only when no advertised endpoint is usable.
+- `modelOverrides` entries for known (enriched) models are now applied as partial patches: only the fields present in the JSON are overridden, and unspecified fields keep their built-in values.
+
+### Removed
+
+- Direct `auth.json` reads and all removed `modelRegistry.authStorage` access.
+- API-key collection and direct credential mutation from `/newapi-provider-add`.
+- Credential deletion from `/newapi-provider-remove`; run `/logout <provider>` before removing the extension configuration because Pi v0.80.8 does not expose extension-safe logout.
+
 ## [0.3.0] - 2026-06-05
 
 ### Added
