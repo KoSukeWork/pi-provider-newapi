@@ -1,9 +1,11 @@
 # pi-provider-newapi
 
+[![pi package catalog](https://img.shields.io/badge/pi-package%20catalog-5B5BD6.svg)](https://pi.dev/packages/pi-provider-newapi)
+[![npm](https://img.shields.io/npm/v/pi-provider-newapi.svg)](https://www.npmjs.com/package/pi-provider-newapi)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![pi extension](https://img.shields.io/badge/extension-pi%20provider-green.svg)](https://github.com/ttimasdf/pi-provider-newapi)
+[![社区 | Linux.do](https://img.shields.io/badge/社区-Linux.do-blue.svg)](https://linux.do/)
 
-用于自托管 [NewAPI](https://github.com/QuantumNous/new-api) 网关的 [pi](https://github.com/earendil-works/pi) coding-agent provider 扩展。要求 Pi 与 `@earendil-works/pi-ai` 均为 **v0.80.8 或更高版本**。
+用于自托管 [NewAPI](https://github.com/QuantumNous/new-api) 网关的 [pi](https://github.com/earendil-works/pi) coding-agent provider 扩展。自 v0.4.0 起，要求 Pi Coding Agent 为 **v0.80.8 或更高版本**。
 
 支持多个命名 provider，每个 provider 对应独立的 NewAPI 实例。发现的模型会使用 pi 的内置元数据增强，并自动选择路由：
 

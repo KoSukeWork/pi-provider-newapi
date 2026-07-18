@@ -1,9 +1,11 @@
 # pi-provider-newapi
 
+[![pi package catalog](https://img.shields.io/badge/pi-package%20catalog-5B5BD6.svg)](https://pi.dev/packages/pi-provider-newapi)
+[![npm](https://img.shields.io/npm/v/pi-provider-newapi.svg)](https://www.npmjs.com/package/pi-provider-newapi)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![pi extension](https://img.shields.io/badge/extension-pi%20provider-green.svg)](https://github.com/ttimasdf/pi-provider-newapi)
+[![社区 | Linux.do](https://img.shields.io/badge/社区-Linux.do-blue.svg)](https://linux.do/)
 
-A [pi](https://github.com/earendil-works/pi) coding-agent provider extension for self-hosted [NewAPI](https://github.com/QuantumNous/new-api) gateways. It requires Pi and `@earendil-works/pi-ai` **v0.80.8 or later**.
+A [pi](https://github.com/earendil-works/pi) coding-agent provider extension for self-hosted [NewAPI](https://github.com/QuantumNous/new-api) gateways. Starting with v0.4.0, it requires Pi Coding Agent **v0.80.8 or later**.
 
 Multiple named providers are supported, each backed by an independent NewAPI gateway. Discovered models are enriched from Pi's built-in metadata and routed automatically:
 
