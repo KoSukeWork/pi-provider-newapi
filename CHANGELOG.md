@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Require Pi v0.84.0 or newer and migrate dynamic catalog persistence to generation-checked `context.publish()`, preventing stale refreshes from overwriting newer model lists.
+- Pin the Pi SDK packages at v0.84.0 as development dependencies so local typechecking and tests use the supported extension API.
 - Refactored the extension into focused `src/` modules while retaining the root `index.ts` Pi entry point and stable startup display name.
 - Split tests into focused suites under `test/` and kept internal model helpers private to the package implementation.
 - Changed unknown-model defaults to a 128,000-token context window and 32,768 maximum output tokens.

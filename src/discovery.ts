@@ -16,10 +16,9 @@ export async function refreshProviderModels(
 	const entry = config.providers[providerName];
 	if (!entry) return [];
 
-	const cached = await context.store.read();
-	const cachedModels = (cached?.models ?? []) as unknown as ProviderModelConfig[];
+	const cachedModels = (context.stored?.models ?? []) as unknown as ProviderModelConfig[];
 	// Offline startup and cancelled refreshes must never discard the last usable catalog.
-	if (!context.allowNetwork || context.signal?.aborted) return cachedModels;
+	if (!context.allowNetwork || context.signal.aborted) return cachedModels;
 
 	const credential = context.credential;
 	const apiKey = credential?.type === "api_key" && credential.key ? credential.key : undefined;
@@ -68,9 +67,12 @@ export async function refreshProviderModels(
 			return cachedModels;
 		}
 
-		await context.store.write({
-			models: models as unknown as Model<Api>[],
-			checkedAt: Date.now(),
+		if (context.signal.aborted) return cachedModels;
+		await context.publish({
+			persist: {
+				models: models as unknown as Model<Api>[],
+				checkedAt: Date.now(),
+			},
 		});
 		return models;
 	} catch (err) {

@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![社区 | Linux.do](https://img.shields.io/badge/社区-Linux.do-blue.svg)](https://linux.do/)
 
-用于自托管 [NewAPI](https://github.com/QuantumNous/new-api) 网关的 [pi](https://github.com/earendil-works/pi) coding-agent provider 扩展。自 v0.4.0 起，要求 Pi Coding Agent 为 **v0.80.8 或更高版本**。
+用于自托管 [NewAPI](https://github.com/QuantumNous/new-api) 网关的 [pi](https://github.com/earendil-works/pi) coding-agent provider 扩展。要求 Pi Coding Agent 为 **v0.84.0 或更高版本**。
 
 支持多个命名 provider，每个 provider 对应独立的 NewAPI 实例。发现的模型会使用 pi 的内置元数据增强，并自动选择路由：
 
@@ -64,7 +64,7 @@ pi> /model my_gateway/claude-sonnet-4-5
 
 ### 移除流程
 
-Pi v0.80.8 尚未向扩展公开凭据删除接口。完整移除 provider 时，请先运行：
+Pi 尚未通过扩展 API 公开凭据删除接口。完整移除 provider 时，请先运行：
 
 ```text
 /logout my_gateway
