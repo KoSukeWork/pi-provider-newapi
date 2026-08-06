@@ -12,6 +12,7 @@ export interface Settings {
 }
 
 export interface NewAPIConfig {
+	version: 1;
 	providers: Record<string, ProviderEntry>;
 	settings: Settings;
 }

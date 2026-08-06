@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Split tests into focused suites under `test/` and kept internal model helpers private to the package implementation.
 - Changed unknown-model defaults to a 128,000-token context window and 32,768 maximum output tokens.
 - Pi now applies all user model metadata and compatibility patches after dynamic NewAPI model discovery.
+- Moved extension configuration from `<agentDir>/extensions/` to `<agentDir>/extension-settings/`; unified path/schema detection through `getConfigVersion()` and added top-level schema `version: 1`, with automatic migration for existing configuration.
 
 ### Removed
 

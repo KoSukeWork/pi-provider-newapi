@@ -87,10 +87,11 @@ NewAPI 发现功能通过 Pi 的动态 provider 刷新回调实现：
 
 ## 配置说明
 
-网关配置保存在 `<agentDir>/extensions/provider-newapi.json`：
+网关配置保存在 `<agentDir>/extension-settings/provider-newapi.json`：
 
 ```json
 {
+  "version": 1,
   "providers": {
     "my_gateway": {
       "baseUrl": "https://ai.example.com",
@@ -110,6 +111,7 @@ NewAPI 发现功能通过 Pi 的动态 provider 刷新回调实现：
 }
 ```
 
+- **`version`** — 扩展配置的 schema 版本。当前版本为 `1`；没有版本字段的旧文件会按 schema `0` 检测并自动升级。来自更高版本 schema 的文件会保持原样并拒绝加载，直到扩展完成升级。
 - **`providers`** — 每个 NewAPI 实例一个条目，键名即 Pi provider ID。
 - **`modelApiOverrides`** — 将 JavaScript 正则表达式源码映射到 Pi API。规则按 JSON 中的顺序检查，首个匹配项生效。显式匹配会覆盖 NewAPI 公布的端点元数据。支持 `anthropic-messages`、`openai-completions` 和 `openai-responses`；无效的正则或 API 值会被忽略并输出警告。
 - **`settings.onboardingWarnCountdown`** — 内部状态，用于将无 provider 的提醒限制为三次启动。
@@ -151,7 +153,7 @@ Pi 会在扩展完成模型发现后应用这些精确 ID 覆盖。Provider 级 
 | Linux / macOS | `~/.pi/agent` |
 | Windows | `%USERPROFILE%\.pi\agent` |
 
-如果配置格式错误，扩展会将其备份至 `provider-newapi.json.bak`，然后以有效的空配置重新开始。
+首次使用时，已有的 `<agentDir>/extensions/provider-newapi.json` 会自动移动到新的 `extension-settings` 位置。如果配置格式错误，扩展会将其备份至 `provider-newapi.json.bak`，然后以有效的空配置重新开始。
 
 ## 多 provider
 

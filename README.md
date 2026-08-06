@@ -87,10 +87,11 @@ No API key is included in the model-list cache.
 
 ## Configuration
 
-Gateway configuration is stored at `<agentDir>/extensions/provider-newapi.json`:
+Gateway configuration is stored at `<agentDir>/extension-settings/provider-newapi.json`:
 
 ```json
 {
+  "version": 1,
   "providers": {
     "my_gateway": {
       "baseUrl": "https://ai.example.com",
@@ -110,6 +111,7 @@ Gateway configuration is stored at `<agentDir>/extensions/provider-newapi.json`:
 }
 ```
 
+- **`version`** — extension configuration schema version. The current version is `1`; pre-versioned files are detected as schema `0` and upgraded automatically. Files from newer schemas are preserved and rejected until the extension is upgraded.
 - **`providers`** — one entry per NewAPI instance. The map key is the Pi provider ID.
 - **`modelApiOverrides`** — maps JavaScript regular-expression sources to a Pi API. Rules are checked in JSON order and the first match wins. An explicit match overrides NewAPI's advertised endpoint metadata. Supported values are `anthropic-messages`, `openai-completions`, and `openai-responses`; invalid patterns or values are ignored with a warning.
 - **`settings.onboardingWarnCountdown`** — internal state that limits the no-provider reminder to three startups.
@@ -151,7 +153,7 @@ The extension no longer reads its former `modelOverrides` or `settings.sendSessi
 | Linux / macOS | `~/.pi/agent` |
 | Windows | `%USERPROFILE%\.pi\agent` |
 
-If the configuration is malformed, it is backed up to `provider-newapi.json.bak` and reset to a valid empty configuration.
+On first use, an existing `<agentDir>/extensions/provider-newapi.json` is moved automatically to the new `extension-settings` location. If the configuration is malformed, it is backed up to `provider-newapi.json.bak` and reset to a valid empty configuration.
 
 ## Multiple providers
 

@@ -2,6 +2,7 @@ import type { BuiltinProvider } from "@earendil-works/pi-ai/compat";
 import type { NewAPIModelApi } from "./types.ts";
 
 export const CONFIG_FILENAME = "provider-newapi.json";
+export const CONFIG_SCHEMA_VERSION = 1;
 export const QUOTA_PER_USD = 500_000;
 export const TOKENS_PER_COST = 1_000_000;
 export const DEFAULT_GROUP_RATE = 1.0;

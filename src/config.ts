@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { CONFIG_FILENAME, SUPPORTED_NEWAPI_MODEL_APIS } from "./constants.ts";
+import { CONFIG_FILENAME, CONFIG_SCHEMA_VERSION, SUPPORTED_NEWAPI_MODEL_APIS } from "./constants.ts";
+import { migrateConfig, warnLegacyProviderConfig } from "./migration.ts";
 import type { NewAPIConfig, NewAPIModelApi, ProviderEntry } from "./types.ts";
 
 export function getConfigPath(): string {
-	return join(getAgentDir(), "extensions", CONFIG_FILENAME);
+	return join(getAgentDir(), "extension-settings", CONFIG_FILENAME);
 }
 
 const emittedConfigWarnings = new Set<string>();
@@ -21,13 +22,7 @@ function parseProviders(value: Record<string, unknown>): Record<string, Provider
 	for (const [name, rawEntry] of Object.entries(value)) {
 		if (typeof rawEntry !== "object" || rawEntry === null) continue;
 		const entry = rawEntry as Record<string, unknown>;
-		if (typeof entry.modelOverrides === "object" && entry.modelOverrides !== null) {
-			warnConfigOnce(
-				`legacy-model-overrides:${name}`,
-				`NewAPI [${name}]: modelOverrides is no longer supported. Move API routing to modelApiOverrides ` +
-					`and metadata/compat overrides to Pi's models.json.`,
-			);
-		}
+		warnLegacyProviderConfig(name, entry);
 
 		const modelApiOverrides: Record<string, NewAPIModelApi> = {};
 		if (typeof entry.modelApiOverrides === "object" && entry.modelApiOverrides !== null) {
@@ -52,8 +47,8 @@ function parseProviders(value: Record<string, unknown>): Record<string, Provider
 }
 
 export function readConfig(): NewAPIConfig {
-	const configPath = getConfigPath();
-	const empty: NewAPIConfig = { providers: {}, settings: {} };
+	const { path: configPath } = migrateConfig(getConfigPath());
+	const empty: NewAPIConfig = { version: CONFIG_SCHEMA_VERSION, providers: {}, settings: {} };
 
 	if (!existsSync(configPath)) return empty;
 
@@ -90,6 +85,7 @@ export function readConfig(): NewAPIConfig {
 			? (parsed.settings as Record<string, unknown>)
 			: {};
 	return {
+		version: CONFIG_SCHEMA_VERSION,
 		providers: parseProviders(parsed.providers as Record<string, unknown>),
 		settings: {
 			onboardingWarnCountdown:
@@ -109,7 +105,7 @@ function invalidateConfig(configPath: string, raw: string): void {
 		console.warn(`NewAPI: could not write config backup: ${err instanceof Error ? err.message : String(err)}`);
 	}
 	try {
-		writeConfigAtomic({ providers: {}, settings: {} });
+		writeConfigAtomic({ version: CONFIG_SCHEMA_VERSION, providers: {}, settings: {} });
 	} catch (err) {
 		console.warn(`NewAPI: could not reset config file: ${err instanceof Error ? err.message : String(err)}`);
 	}
