@@ -2,13 +2,13 @@
 
 `pi-provider-newapi` is a [pi](https://github.com/earendil-works/pi) coding-agent extension that exposes self-hosted [NewAPI](https://github.com/QuantumNous/new-api) gateways as pi model providers. It targets **pi SDK v0.80.8+** (`@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent`).
 
-`index.ts` is the single Pi entry point and re-exports the tested model helpers. Implementation modules live under `src/`; tests remain in `index.test.ts`. There is no build step — pi loads the `.ts` entry directly (`package.json` → `pi.extensions`).
+`index.ts` is the single Pi entry point and exports only the extension factory. Implementation modules live under `src/`; focused tests under `test/` import those modules directly. There is no build step — pi loads the `.ts` entry directly (`package.json` → `pi.extensions`).
 
 ## Commands
 
 ```bash
-npm run typecheck   # tsc --noEmit (checks index.ts, src/, and index.test.ts)
-npm test            # node --test (runs index.test.ts via Node's TS strip-only loader)
+npm run typecheck   # tsc --noEmit (checks index.ts, src/, and test/)
+npm test            # node --test (discovers test/*.test.ts via Node's TS strip-only loader)
 ```
 
 Interactive smoke test against the source checkout (needs a TTY; will hang in non-interactive shells):
@@ -37,7 +37,7 @@ Data flow: **config + Pi credential → discover → enrich → build model conf
 - **`provider.ts`**: registers configured NewAPI providers with `models: []` and dynamic `refreshModels` callbacks.
 - **`commands.ts`**: registers the add/remove/list commands.
 - **`extension.ts`**: composition root for startup provider registration, onboarding, and commands.
-- **`index.ts`**: stable Pi entry point and public facade. Keep `package.json` → `pi.extensions` pointed at `./index.ts` so internal `src/` paths do not change the startup display label.
+- **`index.ts`**: stable Pi entry point that exports only the extension factory. Keep `package.json` → `pi.extensions` pointed at `./index.ts` so internal `src/` paths do not change the startup display label.
 
 ## Commands (user-facing)
 
