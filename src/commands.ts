@@ -5,7 +5,6 @@ import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { readConfig, updateConfig } from "./config.ts";
 import {
 	buildGeneratedModelsJson,
-	countGeneratedModelOverrides,
 	getGeneratedModelsPath,
 	writeGeneratedModelsJson,
 } from "./generated-models.ts";
@@ -123,7 +122,10 @@ export function registerCommands(pi: ExtensionAPI, state: ProviderRuntimeState):
 			const modelsPath = join(getAgentDir(), "models.json");
 			const generatedLink = terminalFileLink(generatedPath, ctx.mode === "tui");
 			const modelsLink = terminalFileLink(modelsPath, ctx.mode === "tui");
-			const count = countGeneratedModelOverrides(generated);
+			const count = Object.values(generated.providers).reduce(
+				(total, provider) => total + Object.keys(provider.modelOverrides).length,
+				0,
+			);
 			const providersWithoutModels = providerNames.filter(
 				(name) => !currentModels.some((model) => model.provider === name),
 			);

@@ -7,11 +7,7 @@ import { test } from "node:test";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { getModels } from "@earendil-works/pi-ai/compat";
 
-import {
-	buildGeneratedModelsJson,
-	countGeneratedModelOverrides,
-	writeGeneratedModelsJson,
-} from "../src/generated-models.ts";
+import { buildGeneratedModelsJson, writeGeneratedModelsJson } from "../src/generated-models.ts";
 
 function model(provider: string, id: string): Model<Api> {
 	const base = getModels("anthropic")[0];
@@ -40,7 +36,7 @@ test("buildGeneratedModelsJson: emits only unknown models for configured provide
 		contextWindow: 128000,
 		maxTokens: 32768,
 	});
-	assert.equal(countGeneratedModelOverrides(generated), 2);
+	assert.equal(Object.keys(generated.providers.gw.modelOverrides).length, 2);
 });
 
 test("writeGeneratedModelsJson: writes valid formatted JSON", () => {

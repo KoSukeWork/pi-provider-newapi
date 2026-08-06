@@ -11,41 +11,6 @@ export function getConfigPath(): string {
 
 const emittedConfigWarnings = new Set<string>();
 
-function warnConfigOnce(key: string, message: string): void {
-	if (emittedConfigWarnings.has(key)) return;
-	emittedConfigWarnings.add(key);
-	console.warn(message);
-}
-
-function parseProviders(value: Record<string, unknown>): Record<string, ProviderEntry> {
-	const providers: Record<string, ProviderEntry> = {};
-	for (const [name, rawEntry] of Object.entries(value)) {
-		if (typeof rawEntry !== "object" || rawEntry === null) continue;
-		const entry = rawEntry as Record<string, unknown>;
-		warnLegacyProviderConfig(name, entry);
-
-		const modelApiOverrides: Record<string, NewAPIModelApi> = {};
-		if (typeof entry.modelApiOverrides === "object" && entry.modelApiOverrides !== null) {
-			for (const [pattern, api] of Object.entries(entry.modelApiOverrides as Record<string, unknown>)) {
-				if (typeof api === "string" && SUPPORTED_NEWAPI_MODEL_APIS.has(api as NewAPIModelApi)) {
-					modelApiOverrides[pattern] = api as NewAPIModelApi;
-				} else {
-					warnConfigOnce(
-						`unsupported-api:${name}:${pattern}`,
-						`NewAPI [${name}]: modelApiOverrides pattern "${pattern}" has unsupported API "${String(api)}" — ignoring it.`,
-					);
-				}
-			}
-		}
-
-		providers[name] = {
-			baseUrl: typeof entry.baseUrl === "string" ? entry.baseUrl : "",
-			modelApiOverrides,
-		};
-	}
-	return providers;
-}
-
 export function readConfig(): NewAPIConfig {
 	const { path: configPath } = migrateConfig(getConfigPath());
 	const empty: NewAPIConfig = { version: CONFIG_SCHEMA_VERSION, providers: {}, settings: {} };
@@ -80,13 +45,41 @@ export function readConfig(): NewAPIConfig {
 	}
 
 	const parsed = data as Record<string, unknown>;
+	const providers: Record<string, ProviderEntry> = {};
+	for (const [name, rawEntry] of Object.entries(parsed.providers as Record<string, unknown>)) {
+		if (typeof rawEntry !== "object" || rawEntry === null) continue;
+		const entry = rawEntry as Record<string, unknown>;
+		warnLegacyProviderConfig(name, entry);
+
+		const modelApiOverrides: Record<string, NewAPIModelApi> = {};
+		if (typeof entry.modelApiOverrides === "object" && entry.modelApiOverrides !== null) {
+			for (const [pattern, api] of Object.entries(entry.modelApiOverrides as Record<string, unknown>)) {
+				if (typeof api === "string" && SUPPORTED_NEWAPI_MODEL_APIS.has(api as NewAPIModelApi)) {
+					modelApiOverrides[pattern] = api as NewAPIModelApi;
+					continue;
+				}
+				const warningKey = `unsupported-api:${name}:${pattern}`;
+				if (!emittedConfigWarnings.has(warningKey)) {
+					emittedConfigWarnings.add(warningKey);
+					console.warn(
+						`NewAPI [${name}]: modelApiOverrides pattern "${pattern}" has unsupported API "${String(api)}" — ignoring it.`,
+					);
+				}
+			}
+		}
+
+		providers[name] = {
+			baseUrl: typeof entry.baseUrl === "string" ? entry.baseUrl : "",
+			modelApiOverrides,
+		};
+	}
 	const rawSettings =
 		typeof parsed.settings === "object" && parsed.settings !== null
 			? (parsed.settings as Record<string, unknown>)
 			: {};
 	return {
 		version: CONFIG_SCHEMA_VERSION,
-		providers: parseProviders(parsed.providers as Record<string, unknown>),
+		providers,
 		settings: {
 			onboardingWarnCountdown:
 				typeof rawSettings.onboardingWarnCountdown === "number"

@@ -54,13 +54,6 @@ export function buildGeneratedModelsJson(
 	return { providers };
 }
 
-export function countGeneratedModelOverrides(config: GeneratedModelsJson): number {
-	return Object.values(config.providers).reduce(
-		(total, provider) => total + Object.keys(provider.modelOverrides).length,
-		0,
-	);
-}
-
 export function getGeneratedModelsPath(): string {
 	return join(getAgentDir(), "models-generated.json");
 }

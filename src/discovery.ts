@@ -4,47 +4,6 @@ import { readConfig } from "./config.ts";
 import { fetchWithTimeout, NewAPIError } from "./http.ts";
 import { buildProviderModels, parseModelsResponse, parseRatioConfig } from "./models.ts";
 import { EMPTY_RATIOS } from "./types.ts";
-import type { ProviderEntry } from "./types.ts";
-
-async function discoverModels(
-	providerName: string,
-	entry: ProviderEntry,
-	apiKey: string | undefined,
-	signal: AbortSignal | undefined,
-): Promise<ProviderModelConfig[]> {
-	const baseUrl = entry.baseUrl.replace(/\/+$/, "");
-	let ratios = EMPTY_RATIOS;
-	try {
-		const ratioResponse = await fetchWithTimeout(`${baseUrl}/api/ratio_config`, { signal });
-		if (ratioResponse.ok) ratios = parseRatioConfig(await ratioResponse.json());
-	} catch (err) {
-		if (err instanceof NewAPIError && err.code === "aborted") throw err;
-		console.warn(
-			`NewAPI [${providerName}]: /api/ratio_config unavailable — ${err instanceof Error ? err.message : String(err)}`,
-		);
-	}
-
-	const headers: Record<string, string> = {};
-	if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-	const modelsResponse = await fetchWithTimeout(`${baseUrl}/v1/models`, { headers, signal });
-	if (modelsResponse.status === 401 || modelsResponse.status === 403) {
-		throw new NewAPIError(
-			"auth",
-			`GET /v1/models: ${modelsResponse.status} ${modelsResponse.statusText} — check the API key`,
-		);
-	}
-	if (!modelsResponse.ok) {
-		throw new NewAPIError("http", `GET /v1/models: ${modelsResponse.status} ${modelsResponse.statusText}`);
-	}
-
-	return buildProviderModels({
-		providerName,
-		baseUrl,
-		apiModels: parseModelsResponse(await modelsResponse.json()),
-		ratios,
-		modelApiOverrides: entry.modelApiOverrides ?? {},
-	});
-}
 
 /** Refresh the provider catalog while retaining the last good cached result on failure. */
 export async function refreshProviderModels(
@@ -63,7 +22,41 @@ export async function refreshProviderModels(
 	const apiKey = credential?.type === "api_key" && credential.key ? credential.key : undefined;
 
 	try {
-		const models = await discoverModels(providerName, entry, apiKey, context.signal);
+		const baseUrl = entry.baseUrl.replace(/\/+$/, "");
+		let ratios = EMPTY_RATIOS;
+		try {
+			const ratioResponse = await fetchWithTimeout(`${baseUrl}/api/ratio_config`, { signal: context.signal });
+			if (ratioResponse.ok) ratios = parseRatioConfig(await ratioResponse.json());
+		} catch (err) {
+			if (err instanceof NewAPIError && err.code === "aborted") throw err;
+			console.warn(
+				`NewAPI [${providerName}]: /api/ratio_config unavailable — ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+
+		const headers: Record<string, string> = {};
+		if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+		const modelsResponse = await fetchWithTimeout(`${baseUrl}/v1/models`, {
+			headers,
+			signal: context.signal,
+		});
+		if (modelsResponse.status === 401 || modelsResponse.status === 403) {
+			throw new NewAPIError(
+				"auth",
+				`GET /v1/models: ${modelsResponse.status} ${modelsResponse.statusText} — check the API key`,
+			);
+		}
+		if (!modelsResponse.ok) {
+			throw new NewAPIError("http", `GET /v1/models: ${modelsResponse.status} ${modelsResponse.statusText}`);
+		}
+
+		const models = buildProviderModels({
+			providerName,
+			baseUrl,
+			apiModels: parseModelsResponse(await modelsResponse.json()),
+			ratios,
+			modelApiOverrides: entry.modelApiOverrides ?? {},
+		});
 
 		if (models.length === 0 && cachedModels.length > 0) {
 			console.warn(`NewAPI [${providerName}]: /v1/models returned zero models — keeping cached catalog.`);

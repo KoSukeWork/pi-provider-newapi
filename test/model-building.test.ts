@@ -6,7 +6,6 @@ import { getModels } from "@earendil-works/pi-ai/compat";
 import {
 	buildProviderModels,
 	compileModelApiOverrides,
-	findModelApiOverride,
 	resolveApiBaseUrl,
 } from "../src/models.ts";
 import type { Ratios } from "../src/types.ts";
@@ -67,14 +66,16 @@ test("buildProviderModels: regex API override is authoritative", () => {
 	assert.equal(models[0].baseUrl, "https://gw.example.com/v1");
 });
 
-test("compileModelApiOverrides: first matching regex wins", () => {
-	const { rules, errors } = compileModelApiOverrides({
-		"^gpt-": "openai-responses",
-		"^gpt-special$": "openai-completions",
-	});
+test("buildProviderModels: first matching API override wins", () => {
+	const models = build(
+		[{ id: "gpt-special", supportedEndpointTypes: ["openai"] }],
+		{
+			"^gpt-": "openai-responses",
+			"^gpt-special$": "openai-completions",
+		},
+	);
 
-	assert.deepEqual(errors, []);
-	assert.equal(findModelApiOverride("gpt-special", rules), "openai-responses");
+	assert.equal(models[0].api, "openai-responses");
 });
 
 test("compileModelApiOverrides: invalid regex and API values are rejected", () => {

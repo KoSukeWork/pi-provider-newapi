@@ -27,14 +27,6 @@ export function resolveApiBaseUrl(baseUrl: string, api: Api): string {
 	}
 }
 
-export function calcInputCost(modelRate: number): number {
-	return modelRate * DEFAULT_GROUP_RATE * (TOKENS_PER_COST / QUOTA_PER_USD);
-}
-
-export function calcOutputCost(modelRate: number, completionRate: number): number {
-	return modelRate * completionRate * DEFAULT_GROUP_RATE * (TOKENS_PER_COST / QUOTA_PER_USD);
-}
-
 export function calcCacheCost(modelRate: number, ratio: number): number {
 	return modelRate * ratio * DEFAULT_GROUP_RATE * (TOKENS_PER_COST / QUOTA_PER_USD);
 }
@@ -118,18 +110,6 @@ export function compileModelApiOverrides(overrides: Record<string, string>): {
 	return { rules, errors };
 }
 
-export function findModelApiOverride(modelId: string, rules: readonly ModelApiOverrideRule[]): NewAPIModelApi | undefined {
-	return rules.find((rule) => rule.regex.test(modelId))?.api;
-}
-
-function gatewayApisFor(entry: NewAPIModelEntry): Set<NewAPIModelApi> {
-	const apis = new Set<NewAPIModelApi>();
-	for (const type of entry.supportedEndpointTypes) {
-		for (const api of ENDPOINT_TYPE_TO_APIS[type] ?? []) apis.add(api);
-	}
-	return apis;
-}
-
 function pickModelApi(preferred: Api | undefined, gatewayApis: Set<NewAPIModelApi>): NewAPIModelApi {
 	if (
 		preferred &&
@@ -207,8 +187,11 @@ export function buildProviderModels(params: {
 	for (const modelEntry of apiModels) {
 		const normalizedId = modelEntry.id.replaceAll(".", "-").toLowerCase();
 		const enriched = enrichmentLookup.get(normalizedId);
-		const gatewayApis = gatewayApisFor(modelEntry);
-		const apiOverride = findModelApiOverride(modelEntry.id, rules);
+		const gatewayApis = new Set<NewAPIModelApi>();
+		for (const type of modelEntry.supportedEndpointTypes) {
+			for (const candidate of ENDPOINT_TYPE_TO_APIS[type] ?? []) gatewayApis.add(candidate);
+		}
+		const apiOverride = rules.find((rule) => rule.regex.test(modelEntry.id))?.api;
 		let name = modelEntry.id;
 		let reasoning = false;
 		let thinkingLevelMap = enriched?.model.thinkingLevelMap;
@@ -251,8 +234,8 @@ export function buildProviderModels(params: {
 			thinkingLevelMap,
 			input,
 			cost: {
-				input: calcInputCost(modelRate),
-				output: calcOutputCost(modelRate, completionRate),
+				input: modelRate * DEFAULT_GROUP_RATE * (TOKENS_PER_COST / QUOTA_PER_USD),
+				output: modelRate * completionRate * DEFAULT_GROUP_RATE * (TOKENS_PER_COST / QUOTA_PER_USD),
 				cacheRead: calcCacheCost(modelRate, cacheRatio),
 				cacheWrite: calcCacheCost(modelRate, createCacheRatio),
 			},
