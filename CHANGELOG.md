@@ -6,10 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Replaced extension-owned `modelOverrides` with regex-based `modelApiOverrides`. Move metadata and compatibility overrides, including `sendSessionAffinityHeaders`, to Pi's `<agentDir>/models.json`.
+- Removed `settings.sendSessionAffinityHeaders`; session-affinity behavior is now configured through Pi model or provider `compat` settings.
+
+### Added
+
+- Added `/newapi-generate-models-json` to reload available catalogs and atomically write unknown-model override templates to `<agentDir>/models-generated.json` for manual merging into Pi's `models.json`.
+- Added ordered regular-expression API routing through `modelApiOverrides`; the first matching rule is authoritative over advertised gateway endpoint metadata.
+
 ### Changed
 
 - Refactored the extension into focused `src/` modules while retaining the root `index.ts` Pi entry point and stable startup display name.
 - Split tests into focused suites under `test/` and kept internal model helpers private to the package implementation.
+- Changed unknown-model defaults to a 128,000-token context window and 32,768 maximum output tokens.
+- Pi now applies all user model metadata and compatibility patches after dynamic NewAPI model discovery.
+
+### Removed
+
+- Removed automatic unknown-model template persistence from `provider-newapi.json`; the extension never edits Pi's user-owned `models.json`.
 
 ## [0.4.0] - 2026-06-06
 

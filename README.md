@@ -59,7 +59,8 @@ Do not put an API key in the extension configuration. Pi owns credentials and st
 |---|---|
 | `/newapi-provider-add [name]` | Add a gateway configuration and register it immediately. Then run `/login <name>`. |
 | `/newapi-provider-remove [name]` | Unregister and remove a gateway configuration. Run `/logout <name>` first to remove its Pi-owned credential. |
-| `/newapi-provider-list` | Show configured providers, credential status, overrides, and active state. |
+| `/newapi-provider-list` | Show configured providers, credential status, API override count, and active state. |
+| `/newapi-generate-models-json` | Generate Pi `modelOverrides` templates for currently discovered unknown models. |
 
 ### Removal workflow
 
@@ -76,7 +77,7 @@ The remove command never edits `auth.json` directly, which keeps the extension c
 
 NewAPI discovery is implemented as Pi's dynamic provider refresh callback:
 
-- Opening `/model` refreshes configured NewAPI model lists in the background. After changing `settings.sendSessionAffinityHeaders` or other extension configuration, open `/model` to apply it to the refreshed model list.
+- Opening `/model` refreshes configured NewAPI model lists in the background. After changing `modelApiOverrides` or Pi's `models.json`, open `/model` to apply the updated configuration.
 - `pi update --models` forces an immediate model-list refresh; use it instead when you need the updated model configuration without waiting for the background refresh.
 - Successful model lists are stored per provider in Pi's `<agentDir>/models-store.json`.
 - In offline mode, Pi restores the last successful model list without making NewAPI requests.
@@ -93,32 +94,55 @@ Gateway configuration is stored at `<agentDir>/extensions/provider-newapi.json`:
   "providers": {
     "my_gateway": {
       "baseUrl": "https://ai.example.com",
-      "modelOverrides": {
-        "unknown-model-id": {
-          "api": "anthropic-messages",
-          "reasoning": false,
-          "input": ["text"],
-          "contextWindow": 128000,
-          "maxTokens": 4096
-        }
+      "modelApiOverrides": {
+        "^claude-": "anthropic-messages",
+        "^gpt-": "openai-completions"
       }
     },
     "second_gateway": {
       "baseUrl": "https://gw2.example.com",
-      "modelOverrides": {}
+      "modelApiOverrides": {}
     }
   },
   "settings": {
-    "onboardingWarnCountdown": 3,
-    "sendSessionAffinityHeaders": true
+    "onboardingWarnCountdown": 3
   }
 }
 ```
 
 - **`providers`** — one entry per NewAPI instance. The map key is the Pi provider ID.
-- **`modelOverrides`** — metadata for unknown models or patches over known built-in metadata. For a known (enriched) model, only the fields you specify are overridden; the rest keep their built-in values, so a partial entry like `{ "reasoning": true }` is valid. Unknown models receive a generated template after a successful discovery; edit it as necessary.
+- **`modelApiOverrides`** — maps JavaScript regular-expression sources to a Pi API. Rules are checked in JSON order and the first match wins. An explicit match overrides NewAPI's advertised endpoint metadata. Supported values are `anthropic-messages`, `openai-completions`, and `openai-responses`; invalid patterns or values are ignored with a warning.
 - **`settings.onboardingWarnCountdown`** — internal state that limits the no-provider reminder to three startups.
-- **`settings.sendSessionAffinityHeaders`** — when not `false`, adds Pi's session-affinity compatibility option to all discovered `openai-completions` and `anthropic-messages` models. This helps gateways route cache-enabled requests from a session to the same backend. Defaults to `true`. `openai-responses` already sends its session-affinity data for cache-enabled requests.
+
+Model metadata and compatibility settings are owned by Pi. Put them in `<agentDir>/models.json`, using the same provider ID:
+
+```json
+{
+  "providers": {
+    "my_gateway": {
+      "compat": {
+        "sendSessionAffinityHeaders": true
+      },
+      "modelOverrides": {
+        "unknown-model-id": {
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 128000,
+          "maxTokens": 32768
+        }
+      }
+    }
+  }
+}
+```
+
+Pi applies these exact-ID overrides after extension model discovery. Provider-level `compat` applies to every model on the gateway; place `compat` inside an exact model override when only one model needs it.
+
+Run `/newapi-generate-models-json` to reload the currently available model lists and write unknown-model templates to `<agentDir>/models-generated.json`. The command prints clickable paths for the generated file and Pi's `<agentDir>/models.json`. Manually copy and merge the relevant provider/model entries; the extension never modifies `models.json`. If a configured provider has no available catalog yet, open `/model` to run discovery and then rerun the generator.
+
+### Migrating from v0.4
+
+The extension no longer reads its former `modelOverrides` or `settings.sendSessionAffinityHeaders` fields. Move each old `api` choice into `modelApiOverrides` (anchor an exact ID as `^model-id$` when appropriate), and move all metadata and `compat` fields into Pi's `models.json` as shown above.
 
 `<agentDir>` normally resolves to:
 

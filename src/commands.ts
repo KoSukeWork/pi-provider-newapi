@@ -1,10 +1,23 @@
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { getProviders } from "@earendil-works/pi-ai/compat";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readConfig, updateConfig } from "./config.ts";
+import {
+	buildGeneratedModelsJson,
+	countGeneratedModelOverrides,
+	getGeneratedModelsPath,
+	writeGeneratedModelsJson,
+} from "./generated-models.ts";
 import { fetchWithTimeout } from "./http.ts";
 import { registerNewAPIProvider } from "./provider.ts";
 import type { ProviderRuntimeState } from "./provider.ts";
 import type { ProviderEntry } from "./types.ts";
+
+function terminalFileLink(path: string, enabled: boolean): string {
+	if (!enabled) return path;
+	return `\u001b]8;;${pathToFileURL(path).href}\u0007${path}\u001b]8;;\u0007`;
+}
 
 export function registerCommands(pi: ExtensionAPI, state: ProviderRuntimeState): void {
 	pi.registerCommand("newapi-provider-add", {
@@ -61,7 +74,7 @@ export function registerCommands(pi: ExtensionAPI, state: ProviderRuntimeState):
 				);
 			}
 
-			const entry: ProviderEntry = { baseUrl, modelOverrides: {} };
+			const entry: ProviderEntry = { baseUrl, modelApiOverrides: {} };
 			await updateConfig((config) => {
 				config.providers[name] = entry;
 				return true;
@@ -72,6 +85,64 @@ export function registerCommands(pi: ExtensionAPI, state: ProviderRuntimeState):
 			ctx.ui.notify(
 				`Provider "${name}" added. Run /login ${name} to enter its API key; Pi will then discover its models.`,
 				"info",
+			);
+		},
+	});
+
+	pi.registerCommand("newapi-generate-models-json", {
+		description: "Generate Pi modelOverrides templates for unknown NewAPI models",
+		handler: async (_args, ctx) => {
+			const config = readConfig();
+			const providerNames = Object.keys(config.providers);
+			if (providerNames.length === 0) {
+				ctx.ui.notify("No NewAPI providers are configured.", "info");
+				return;
+			}
+
+			ctx.ui.notify("Reloading available NewAPI models before generating templates...", "info");
+			let refreshError: string | undefined;
+			try {
+				await ctx.modelRegistry.refresh();
+			} catch (error) {
+				refreshError = error instanceof Error ? error.message : String(error);
+			}
+
+			const currentModels = ctx.modelRegistry.getAll();
+			const generated = buildGeneratedModelsJson(providerNames, currentModels);
+			const generatedPath = getGeneratedModelsPath();
+			try {
+				writeGeneratedModelsJson(generated, generatedPath);
+			} catch (error) {
+				ctx.ui.notify(
+					`Could not write ${generatedPath}: ${error instanceof Error ? error.message : String(error)}`,
+					"error",
+				);
+				return;
+			}
+
+			const modelsPath = join(getAgentDir(), "models.json");
+			const generatedLink = terminalFileLink(generatedPath, ctx.mode === "tui");
+			const modelsLink = terminalFileLink(modelsPath, ctx.mode === "tui");
+			const count = countGeneratedModelOverrides(generated);
+			const providersWithoutModels = providerNames.filter(
+				(name) => !currentModels.some((model) => model.provider === name),
+			);
+			const warnings = [
+				...(refreshError ? [`Model reload failed: ${refreshError}`] : []),
+				...(providersWithoutModels.length > 0
+					? [
+							`No discovered models were available for: ${providersWithoutModels.join(", ")}. ` +
+								"Open /model to refresh discovery, then run this command again.",
+						]
+					: []),
+			];
+			const warning = warnings.length > 0 ? `\n\nWarnings:\n${warnings.map((item) => `  ${item}`).join("\n")}` : "";
+			ctx.ui.notify(
+				`Generated ${count} unknown-model override template${count === 1 ? "" : "s"}:\n${generatedLink}\n\n` +
+					`Copy and merge the relevant provider entries from that file into Pi's models.json:\n${modelsLink}\n\n` +
+					"Do not replace existing providers or modelOverrides entries when pasting; merge them by provider and model ID." +
+					warning,
+				warnings.length > 0 ? "warning" : "info",
 			);
 		},
 	});
@@ -137,12 +208,12 @@ export function registerCommands(pi: ExtensionAPI, state: ProviderRuntimeState):
 			const lines = names.map((name) => {
 				const entry = current.providers[name];
 				const status = ctx.modelRegistry.getProviderAuthStatus(name);
-				const overrideCount = Object.keys(entry.modelOverrides ?? {}).length;
+				const overrideCount = Object.keys(entry.modelApiOverrides ?? {}).length;
 				const stateLabel = state.registered.has(name) ? "active" : "inactive";
 				return (
 					`  ${name}  |  ${entry.baseUrl}  |  ` +
 					`auth: ${status.configured ? "✓" : "✗"}  |  ` +
-					`overrides: ${overrideCount}  |  ${stateLabel}`
+					`API overrides: ${overrideCount}  |  ${stateLabel}`
 				);
 			});
 			ctx.ui.notify(`NewAPI providers (${names.length}):\n${lines.join("\n")}`, "info");

@@ -4,7 +4,9 @@ import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { NewAPIError } from "./http.ts";
 import {
 	API_PREFERENCE,
+	DEFAULT_CONTEXT_WINDOW,
 	DEFAULT_GROUP_RATE,
+	DEFAULT_MAX_TOKENS,
 	DEFAULT_MODEL_API,
 	ENDPOINT_TYPE_TO_APIS,
 	ENRICHMENT_PROVIDERS,
@@ -13,14 +15,7 @@ import {
 	TOKENS_PER_COST,
 } from "./constants.ts";
 import { EMPTY_RATIOS } from "./types.ts";
-import type {
-	BuildModelsResult,
-	ModelLookupItem,
-	NewAPIModelEntry,
-	NewAPIModelInfo,
-	Ratios,
-	Settings,
-} from "./types.ts";
+import type { ModelLookupItem, NewAPIModelApi, NewAPIModelEntry, Ratios } from "./types.ts";
 
 export function resolveApiBaseUrl(baseUrl: string, api: Api): string {
 	switch (api) {
@@ -71,7 +66,7 @@ function getEnrichmentLookup(): Map<string, ModelLookupItem> {
 		}
 
 		for (const model of providerModels) {
-			if (!SUPPORTED_NEWAPI_MODEL_APIS.has(model.api)) continue;
+			if (!SUPPORTED_NEWAPI_MODEL_APIS.has(model.api as NewAPIModelApi)) continue;
 			const stripped = model.id.includes("/") ? model.id.slice(model.id.indexOf("/") + 1) : model.id;
 			const normalizedId = stripped.replaceAll(".", "-").toLowerCase();
 			if (lookup.has(normalizedId)) continue;
@@ -93,20 +88,62 @@ function getEnrichmentLookup(): Map<string, ModelLookupItem> {
 	return lookup;
 }
 
-function gatewayApisFor(entry: NewAPIModelEntry): Set<Api> {
-	const apis = new Set<Api>();
+export function isEnrichedModelId(modelId: string): boolean {
+	return getEnrichmentLookup().has(modelId.replaceAll(".", "-").toLowerCase());
+}
+
+export interface ModelApiOverrideRule {
+	pattern: string;
+	regex: RegExp;
+	api: NewAPIModelApi;
+}
+
+export function compileModelApiOverrides(overrides: Record<string, string>): {
+	rules: ModelApiOverrideRule[];
+	errors: string[];
+} {
+	const rules: ModelApiOverrideRule[] = [];
+	const errors: string[] = [];
+	for (const [pattern, api] of Object.entries(overrides)) {
+		if (!SUPPORTED_NEWAPI_MODEL_APIS.has(api as NewAPIModelApi)) {
+			errors.push(`pattern "${pattern}" uses unsupported API "${api}"`);
+			continue;
+		}
+		try {
+			rules.push({ pattern, regex: new RegExp(pattern), api: api as NewAPIModelApi });
+		} catch (error) {
+			errors.push(`invalid regex "${pattern}": ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+	return { rules, errors };
+}
+
+export function findModelApiOverride(modelId: string, rules: readonly ModelApiOverrideRule[]): NewAPIModelApi | undefined {
+	return rules.find((rule) => rule.regex.test(modelId))?.api;
+}
+
+function gatewayApisFor(entry: NewAPIModelEntry): Set<NewAPIModelApi> {
+	const apis = new Set<NewAPIModelApi>();
 	for (const type of entry.supportedEndpointTypes) {
 		for (const api of ENDPOINT_TYPE_TO_APIS[type] ?? []) apis.add(api);
 	}
 	return apis;
 }
 
-function pickModelApi(preferred: Api | undefined, gatewayApis: Set<Api>): Api {
-	if (preferred && (gatewayApis.size === 0 || gatewayApis.has(preferred))) return preferred;
+function pickModelApi(preferred: Api | undefined, gatewayApis: Set<NewAPIModelApi>): NewAPIModelApi {
+	if (
+		preferred &&
+		SUPPORTED_NEWAPI_MODEL_APIS.has(preferred as NewAPIModelApi) &&
+		(gatewayApis.size === 0 || gatewayApis.has(preferred as NewAPIModelApi))
+	) {
+		return preferred as NewAPIModelApi;
+	}
 	for (const api of API_PREFERENCE) {
 		if (gatewayApis.has(api)) return api;
 	}
-	return preferred ?? DEFAULT_MODEL_API;
+	return SUPPORTED_NEWAPI_MODEL_APIS.has(preferred as NewAPIModelApi)
+		? (preferred as NewAPIModelApi)
+		: DEFAULT_MODEL_API;
 }
 
 export function parseModelsResponse(json: unknown): NewAPIModelEntry[] {
@@ -159,26 +196,26 @@ export function buildProviderModels(params: {
 	baseUrl: string;
 	apiModels: NewAPIModelEntry[];
 	ratios: Ratios;
-	modelOverrides: Record<string, NewAPIModelInfo>;
-	settings?: Settings;
-}): BuildModelsResult {
-	const { providerName, baseUrl, apiModels, ratios, modelOverrides, settings = {} } = params;
-	const sendSessionAffinityHeaders = settings.sendSessionAffinityHeaders !== false;
+	modelApiOverrides: Record<string, string>;
+}): ProviderModelConfig[] {
+	const { providerName, baseUrl, apiModels, ratios, modelApiOverrides } = params;
 	const enrichmentLookup = getEnrichmentLookup();
-	const newOverrides: Record<string, NewAPIModelInfo> = {};
+	const { rules, errors } = compileModelApiOverrides(modelApiOverrides);
+	for (const error of errors) console.warn(`NewAPI [${providerName}]: modelApiOverrides ${error} — ignoring it.`);
 	const models: ProviderModelConfig[] = [];
 
 	for (const modelEntry of apiModels) {
 		const normalizedId = modelEntry.id.replaceAll(".", "-").toLowerCase();
 		const enriched = enrichmentLookup.get(normalizedId);
 		const gatewayApis = gatewayApisFor(modelEntry);
+		const apiOverride = findModelApiOverride(modelEntry.id, rules);
 		let name = modelEntry.id;
-		let reasoning: boolean;
+		let reasoning = false;
 		let thinkingLevelMap = enriched?.model.thinkingLevelMap;
-		let input: ("text" | "image")[];
-		let contextWindow: number;
-		let maxTokens: number;
-		let api: Api;
+		let input: ("text" | "image")[] = ["text"];
+		let contextWindow = DEFAULT_CONTEXT_WINDOW;
+		let maxTokens = DEFAULT_MAX_TOKENS;
+		let api: NewAPIModelApi;
 		let compat: Model<Api>["compat"] | undefined;
 
 		if (enriched) {
@@ -189,53 +226,21 @@ export function buildProviderModels(params: {
 			contextWindow = enriched.model.contextWindow;
 			maxTokens = enriched.model.maxTokens;
 
-			const override = modelOverrides[modelEntry.id];
-			if (override) {
-				if (override.reasoning !== undefined) reasoning = override.reasoning;
-				if (override.input !== undefined) input = override.input;
-				if (override.contextWindow !== undefined) contextWindow = override.contextWindow;
-				if (override.maxTokens !== undefined) maxTokens = override.maxTokens;
-				if (override.thinkingLevelMap !== undefined) thinkingLevelMap = override.thinkingLevelMap;
-			}
-			const preferredApi = override?.api ?? enriched.model.api;
-			api = pickModelApi(preferredApi, gatewayApis);
-			if (preferredApi === undefined && gatewayApis.size === 0) {
+			api = apiOverride ?? pickModelApi(enriched.model.api, gatewayApis);
+			if (apiOverride === undefined && enriched.model.api === undefined && gatewayApis.size === 0) {
 				console.warn(
 					`NewAPI [${providerName}]: enriched model "${modelEntry.id}" from ${enriched.source} has no api ` +
 						`and the gateway advertised none — falling back to ${api}`,
 				);
 			}
 		} else {
-			let override = modelOverrides[modelEntry.id];
-			if (!override) {
-				override = {
-					api: pickModelApi(undefined, gatewayApis),
-					reasoning: false,
-					input: ["text"],
-					contextWindow: 128000,
-					maxTokens: 4096,
-				};
-				newOverrides[modelEntry.id] = override;
-				console.warn(`NewAPI [${providerName}]: unknown model "${modelEntry.id}" — template added to modelOverrides`);
-			}
-			reasoning = override.reasoning ?? false;
-			thinkingLevelMap = override.thinkingLevelMap;
-			input = override.input ?? ["text"];
-			contextWindow = override.contextWindow ?? 128000;
-			maxTokens = override.maxTokens ?? 4096;
-			api = override.api ?? DEFAULT_MODEL_API;
+			api = apiOverride ?? pickModelApi(undefined, gatewayApis);
 		}
 
 		const modelRate = findRatio(modelEntry.id, ratios.modelRatios) ?? 0;
 		const completionRate = findRatio(modelEntry.id, ratios.completionRatios) ?? 1;
 		const cacheRatio = findRatio(modelEntry.id, ratios.cacheRatios) ?? 0;
 		const createCacheRatio = findRatio(modelEntry.id, ratios.createCacheRatios) ?? 0;
-		if (sendSessionAffinityHeaders && (api === "openai-completions" || api === "anthropic-messages")) {
-			compat = {
-				...(compat as Record<string, unknown> | undefined),
-				sendSessionAffinityHeaders: true,
-			} as Model<Api>["compat"];
-		}
 
 		models.push({
 			id: modelEntry.id,
@@ -257,5 +262,5 @@ export function buildProviderModels(params: {
 		});
 	}
 
-	return { models, newOverrides };
+	return models;
 }

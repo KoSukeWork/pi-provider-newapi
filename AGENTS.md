@@ -28,11 +28,12 @@ Node's strip-only TS loader powers `npm test`: **no TS-only runtime syntax** (no
 
 ## Implementation map (`src/`)
 
-Data flow: **config + Pi credential → discover → enrich → build model configs → register/persist.**
+Data flow: **config + Pi credential → discover → enrich → route API → build model configs → register/persist.**
 
-- **`config.ts`** (`readConfig`/`writeConfigAtomic`/`updateConfig`): stores configuration at `<agentDir>/extensions/provider-newapi.json` as `{ providers: { <name>: { baseUrl, modelOverrides } }, settings }`. `updateConfig` is a serialized read-modify-write (module-level promise queue) with atomic temp-file+rename, so concurrent refreshes never clobber each other's provider entries. Malformed config is backed up to `.bak` and reset.
+- **`config.ts`** (`readConfig`/`writeConfigAtomic`/`updateConfig`): stores configuration at `<agentDir>/extensions/provider-newapi.json` as `{ providers: { <name>: { baseUrl, modelApiOverrides } }, settings }`. `updateConfig` is a serialized read-modify-write (module-level promise queue) with atomic temp-file+rename, so concurrent provider setup operations never clobber each other's entries. Malformed config is backed up to `.bak` and reset.
 - **`http.ts`** (`fetchWithTimeout`): combines a local timeout with `context.signal` via `AbortSignal.any`; throws a `NewAPIError` tagged `aborted | timeout | auth | http | payload | network`.
-- **`models.ts`** (pure, exported, tested): parses `/v1/models` and ratio configuration, enriches models from Pi's built-in catalog, routes APIs, computes costs, and builds provider model configs.
+- **`models.ts`** (pure, exported, tested): parses `/v1/models` and ratio configuration, enriches models from Pi's built-in catalog, applies regex `modelApiOverrides`, computes costs, and builds provider model configs. Metadata and compatibility overrides belong to Pi's `models.json`.
+- **`generated-models.ts`**: builds unknown-model `modelOverrides` templates and atomically writes `<agentDir>/models-generated.json`; it never edits Pi's user-owned `models.json`.
 - **`discovery.ts`**: fetches ratio config (best-effort) + `/v1/models` (required), reads the API key from `context.credential`, calls `buildProviderModels`, and implements the `refreshModels` cache/fallback behavior.
 - **`provider.ts`**: registers configured NewAPI providers with `models: []` and dynamic `refreshModels` callbacks.
 - **`commands.ts`**: registers the add/remove/list commands.
@@ -44,6 +45,7 @@ Data flow: **config + Pi credential → discover → enrich → build model conf
 - `/newapi-provider-add [name]` — prompt name + base URL, persist config, register live, tell the user to run `/login`. Only a best-effort unauthenticated reachability check; auth verification happens later in `refreshModels`.
 - `/newapi-provider-remove [name]` — unregister + delete config entry. Warns to run `/logout` first (v0.80.8 exposes no extension-safe credential deletion). Never edits `auth.json`.
 - `/newapi-provider-list` — uses `ctx.modelRegistry.getProviderAuthStatus(name).configured`; never prints secrets.
+- `/newapi-generate-models-json` — reloads the currently available catalogs and writes unknown-model metadata templates to `<agentDir>/models-generated.json`; users manually merge relevant entries into Pi's `models.json`. On Pi versions where registry refresh does not trigger provider discovery, open `/model` first.
 
 ## Conventions
 

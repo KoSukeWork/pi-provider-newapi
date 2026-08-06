@@ -59,7 +59,8 @@ pi> /model my_gateway/claude-sonnet-4-5
 |---|---|
 | `/newapi-provider-add [name]` | 添加网关配置并立即注册；然后运行 `/login <name>`。 |
 | `/newapi-provider-remove [name]` | 注销并删除网关配置。请先运行 `/logout <name>` 删除 Pi 管理的凭据。 |
-| `/newapi-provider-list` | 显示已配置 provider 的认证状态、覆盖条目和活动状态。 |
+| `/newapi-provider-list` | 显示已配置 provider 的认证状态、API 覆盖数量和活动状态。 |
+| `/newapi-generate-models-json` | 为当前已发现的未知模型生成 Pi `modelOverrides` 模板。 |
 
 ### 移除流程
 
@@ -76,7 +77,7 @@ Pi v0.80.8 尚未向扩展公开凭据删除接口。完整移除 provider 时�
 
 NewAPI 发现功能通过 Pi 的动态 provider 刷新回调实现：
 
-- 打开 `/model` 会在后台刷新已配置的 NewAPI 模型列表。更改 `settings.sendSessionAffinityHeaders` 或其他扩展配置后，打开 `/model` 即可将修改应用到刷新后的模型列表。
+- 打开 `/model` 会在后台刷新已配置的 NewAPI 模型列表。更改 `modelApiOverrides` 或 Pi 的 `models.json` 后，打开 `/model` 即可应用新配置。
 - `pi update --models` 会立即强制刷新模型列表；若需要立刻使用更新后的模型配置，请使用该命令而非等待后台刷新。
 - 成功的模型列表按 provider 存储在 Pi 的 `<agentDir>/models-store.json`。
 - 离线模式下，Pi 会恢复最近一次成功的模型列表，且不会向 NewAPI 发出请求。
@@ -93,32 +94,55 @@ NewAPI 发现功能通过 Pi 的动态 provider 刷新回调实现：
   "providers": {
     "my_gateway": {
       "baseUrl": "https://ai.example.com",
-      "modelOverrides": {
-        "unknown-model-id": {
-          "api": "anthropic-messages",
-          "reasoning": false,
-          "input": ["text"],
-          "contextWindow": 128000,
-          "maxTokens": 4096
-        }
+      "modelApiOverrides": {
+        "^claude-": "anthropic-messages",
+        "^gpt-": "openai-completions"
       }
     },
     "second_gateway": {
       "baseUrl": "https://gw2.example.com",
-      "modelOverrides": {}
+      "modelApiOverrides": {}
     }
   },
   "settings": {
-    "onboardingWarnCountdown": 3,
-    "sendSessionAffinityHeaders": true
+    "onboardingWarnCountdown": 3
   }
 }
 ```
 
 - **`providers`** — 每个 NewAPI 实例一个条目，键名即 Pi provider ID。
-- **`modelOverrides`** — 为未知模型补充元数据，或在已知模型的内置元数据之上覆盖字段。对于已知（已增强）的模型，仅覆盖你显式填写的字段，其余字段沿用内置值，因此像 `{ "reasoning": true }` 这样的部分条目也是合法的。发现未知模型后扩展会生成模板，可按需要修改。
+- **`modelApiOverrides`** — 将 JavaScript 正则表达式源码映射到 Pi API。规则按 JSON 中的顺序检查，首个匹配项生效。显式匹配会覆盖 NewAPI 公布的端点元数据。支持 `anthropic-messages`、`openai-completions` 和 `openai-responses`；无效的正则或 API 值会被忽略并输出警告。
 - **`settings.onboardingWarnCountdown`** — 内部状态，用于将无 provider 的提醒限制为三次启动。
-- **`settings.sendSessionAffinityHeaders`** — 未设为 `false` 时，会为所有已发现的 `openai-completions` 和 `anthropic-messages` 模型添加 Pi 的会话亲和兼容选项，帮助网关将可缓存的同一会话请求路由至同一后端。默认为 `true`。`openai-responses` 会在启用缓存的请求中自动发送会话亲和数据。
+
+模型元数据和兼容性设置由 Pi 管理。请使用同一个 provider ID，将它们写入 `<agentDir>/models.json`：
+
+```json
+{
+  "providers": {
+    "my_gateway": {
+      "compat": {
+        "sendSessionAffinityHeaders": true
+      },
+      "modelOverrides": {
+        "unknown-model-id": {
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 128000,
+          "maxTokens": 32768
+        }
+      }
+    }
+  }
+}
+```
+
+Pi 会在扩展完成模型发现后应用这些精确 ID 覆盖。Provider 级 `compat` 作用于网关的所有模型；如果只有单个模型需要某项兼容设置，请将 `compat` 放入对应的模型覆盖中。
+
+运行 `/newapi-generate-models-json` 会重新加载当前可用的模型列表，并将未知模型模板写入 `<agentDir>/models-generated.json`。命令会显示生成文件和 Pi `<agentDir>/models.json` 的可点击路径。请手动复制并合并所需的 provider/模型条目；扩展绝不会修改 `models.json`。如果某个 provider 尚无可用模型列表，请先打开 `/model` 完成发现，再重新运行生成命令。
+
+### 从 v0.4 迁移
+
+扩展不再读取旧的 `modelOverrides` 或 `settings.sendSessionAffinityHeaders` 字段。请将旧条目中的 `api` 选择迁移到 `modelApiOverrides`（精确模型 ID 可写成 `^model-id$`），并按上例将所有元数据和 `compat` 字段迁移到 Pi 的 `models.json`。
 
 `<agentDir>` 的默认位置：
 

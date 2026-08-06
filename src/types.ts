@@ -1,23 +1,14 @@
-import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
-export interface NewAPIModelInfo {
-	api?: Api;
-	reasoning?: boolean;
-	input?: ("text" | "image")[];
-	contextWindow?: number;
-	maxTokens?: number;
-	thinkingLevelMap?: Partial<Record<ModelThinkingLevel, string | null>>;
-}
+export type NewAPIModelApi = Extract<Api, "anthropic-messages" | "openai-completions" | "openai-responses">;
 
 export interface ProviderEntry {
 	baseUrl: string;
-	modelOverrides: Record<string, NewAPIModelInfo>;
+	modelApiOverrides: Record<string, NewAPIModelApi>;
 }
 
 export interface Settings {
 	onboardingWarnCountdown?: number;
-	sendSessionAffinityHeaders?: boolean;
 }
 
 export interface NewAPIConfig {
@@ -47,11 +38,6 @@ export const EMPTY_RATIOS: Ratios = {
 	cacheRatios: {},
 	createCacheRatios: {},
 };
-
-export interface BuildModelsResult {
-	models: ProviderModelConfig[];
-	newOverrides: Record<string, NewAPIModelInfo>;
-}
 
 export interface ModelLookupItem {
 	model: Model<Api>;

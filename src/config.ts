@@ -1,11 +1,54 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { CONFIG_FILENAME } from "./constants.ts";
-import type { NewAPIConfig } from "./types.ts";
+import { CONFIG_FILENAME, SUPPORTED_NEWAPI_MODEL_APIS } from "./constants.ts";
+import type { NewAPIConfig, NewAPIModelApi, ProviderEntry } from "./types.ts";
 
 export function getConfigPath(): string {
 	return join(getAgentDir(), "extensions", CONFIG_FILENAME);
+}
+
+const emittedConfigWarnings = new Set<string>();
+
+function warnConfigOnce(key: string, message: string): void {
+	if (emittedConfigWarnings.has(key)) return;
+	emittedConfigWarnings.add(key);
+	console.warn(message);
+}
+
+function parseProviders(value: Record<string, unknown>): Record<string, ProviderEntry> {
+	const providers: Record<string, ProviderEntry> = {};
+	for (const [name, rawEntry] of Object.entries(value)) {
+		if (typeof rawEntry !== "object" || rawEntry === null) continue;
+		const entry = rawEntry as Record<string, unknown>;
+		if (typeof entry.modelOverrides === "object" && entry.modelOverrides !== null) {
+			warnConfigOnce(
+				`legacy-model-overrides:${name}`,
+				`NewAPI [${name}]: modelOverrides is no longer supported. Move API routing to modelApiOverrides ` +
+					`and metadata/compat overrides to Pi's models.json.`,
+			);
+		}
+
+		const modelApiOverrides: Record<string, NewAPIModelApi> = {};
+		if (typeof entry.modelApiOverrides === "object" && entry.modelApiOverrides !== null) {
+			for (const [pattern, api] of Object.entries(entry.modelApiOverrides as Record<string, unknown>)) {
+				if (typeof api === "string" && SUPPORTED_NEWAPI_MODEL_APIS.has(api as NewAPIModelApi)) {
+					modelApiOverrides[pattern] = api as NewAPIModelApi;
+				} else {
+					warnConfigOnce(
+						`unsupported-api:${name}:${pattern}`,
+						`NewAPI [${name}]: modelApiOverrides pattern "${pattern}" has unsupported API "${String(api)}" — ignoring it.`,
+					);
+				}
+			}
+		}
+
+		providers[name] = {
+			baseUrl: typeof entry.baseUrl === "string" ? entry.baseUrl : "",
+			modelApiOverrides,
+		};
+	}
+	return providers;
 }
 
 export function readConfig(): NewAPIConfig {
@@ -42,12 +85,18 @@ export function readConfig(): NewAPIConfig {
 	}
 
 	const parsed = data as Record<string, unknown>;
+	const rawSettings =
+		typeof parsed.settings === "object" && parsed.settings !== null
+			? (parsed.settings as Record<string, unknown>)
+			: {};
 	return {
-		providers: parsed.providers as NewAPIConfig["providers"],
-		settings:
-			typeof parsed.settings === "object" && parsed.settings !== null
-				? (parsed.settings as NewAPIConfig["settings"])
-				: {},
+		providers: parseProviders(parsed.providers as Record<string, unknown>),
+		settings: {
+			onboardingWarnCountdown:
+				typeof rawSettings.onboardingWarnCountdown === "number"
+					? rawSettings.onboardingWarnCountdown
+					: undefined,
+		},
 	};
 }
 

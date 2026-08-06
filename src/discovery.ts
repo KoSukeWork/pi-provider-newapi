@@ -1,18 +1,17 @@
 import type { Api, Model, RefreshModelsContext } from "@earendil-works/pi-ai";
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
-import { updateConfig, readConfig } from "./config.ts";
+import { readConfig } from "./config.ts";
 import { fetchWithTimeout, NewAPIError } from "./http.ts";
 import { buildProviderModels, parseModelsResponse, parseRatioConfig } from "./models.ts";
 import { EMPTY_RATIOS } from "./types.ts";
-import type { BuildModelsResult, ProviderEntry, Settings } from "./types.ts";
+import type { ProviderEntry } from "./types.ts";
 
 async function discoverModels(
 	providerName: string,
 	entry: ProviderEntry,
 	apiKey: string | undefined,
 	signal: AbortSignal | undefined,
-	settings: Settings,
-): Promise<BuildModelsResult> {
+): Promise<ProviderModelConfig[]> {
 	const baseUrl = entry.baseUrl.replace(/\/+$/, "");
 	let ratios = EMPTY_RATIOS;
 	try {
@@ -43,8 +42,7 @@ async function discoverModels(
 		baseUrl,
 		apiModels: parseModelsResponse(await modelsResponse.json()),
 		ratios,
-		modelOverrides: entry.modelOverrides ?? {},
-		settings,
+		modelApiOverrides: entry.modelApiOverrides ?? {},
 	});
 }
 
@@ -65,33 +63,11 @@ export async function refreshProviderModels(
 	const apiKey = credential?.type === "api_key" && credential.key ? credential.key : undefined;
 
 	try {
-		const { models, newOverrides } = await discoverModels(
-			providerName,
-			entry,
-			apiKey,
-			context.signal,
-			config.settings,
-		);
+		const models = await discoverModels(providerName, entry, apiKey, context.signal);
 
 		if (models.length === 0 && cachedModels.length > 0) {
 			console.warn(`NewAPI [${providerName}]: /v1/models returned zero models — keeping cached catalog.`);
 			return cachedModels;
-		}
-
-		if (Object.keys(newOverrides).length > 0) {
-			await updateConfig((latestConfig) => {
-				const latestEntry = latestConfig.providers[providerName];
-				if (!latestEntry) return false;
-				latestEntry.modelOverrides = latestEntry.modelOverrides ?? {};
-				let changed = false;
-				for (const [id, info] of Object.entries(newOverrides)) {
-					if (!latestEntry.modelOverrides[id]) {
-						latestEntry.modelOverrides[id] = info;
-						changed = true;
-					}
-				}
-				return changed;
-			});
 		}
 
 		await context.store.write({
