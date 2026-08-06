@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Changed unknown-model defaults to a 128,000-token context window and 32,768 maximum output tokens.
 - Pi now applies all user model metadata and compatibility patches after dynamic NewAPI model discovery.
 - Moved extension configuration from `<agentDir>/extensions/` to `<agentDir>/extension-settings/`; unified path/schema detection through `getConfigVersion()` and added top-level schema `version: 1`, with automatic migration for existing configuration.
+- Replaced the shared 3-second HTTP timeout with endpoint-specific limits: 15 seconds for model discovery, 10 seconds for optional ratio metadata, and 5 seconds for the add-provider reachability check.
 
 ### Removed
 

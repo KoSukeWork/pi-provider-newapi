@@ -1,6 +1,6 @@
 /** Provides typed, timeout- and cancellation-aware HTTP requests for NewAPI discovery. */
 
-import { FETCH_TIMEOUT_MS } from "./constants.ts";
+import { DEFAULT_FETCH_TIMEOUT_MS } from "./constants.ts";
 
 export type NewAPIErrorCode = "aborted" | "timeout" | "auth" | "http" | "payload" | "network";
 
@@ -19,7 +19,7 @@ export async function fetchWithTimeout(
 	url: string,
 	options: RequestInit & { timeoutMs?: number; signal?: AbortSignal | null } = {},
 ): Promise<Response> {
-	const { timeoutMs = FETCH_TIMEOUT_MS, signal: upstream, ...fetchOptions } = options;
+	const { timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, signal: upstream, ...fetchOptions } = options;
 
 	if (upstream?.aborted) throw new NewAPIError("aborted", `fetch(${url}) aborted before start`);
 

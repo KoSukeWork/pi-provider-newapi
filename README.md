@@ -85,6 +85,7 @@ Pi controls when dynamic provider catalogs are refreshed:
 - After a successful refresh, pi stores the provider catalog in `<agentDir>/models-store.json`.
 - When network access is disabled, the extension restores the last successful catalog without contacting NewAPI.
 - If a refresh fails, the last good catalog remains available. `/api/ratio_config` is optional, but `/v1/models` must succeed to produce a fresh catalog.
+- Requests allow 15 seconds for `/v1/models`, 10 seconds for optional ratio metadata, and 5 seconds for the add-provider reachability check. Pi's global HTTP dispatcher still provides proxy routing and idle-timeout handling underneath these local limits.
 
 Catalog updates use pi's generation-checked publishing API, so an older, slower refresh cannot overwrite newer model data. API keys are never included in the catalog store.
 

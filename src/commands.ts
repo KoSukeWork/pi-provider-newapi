@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { getProviders } from "@earendil-works/pi-ai/compat";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readConfig, updateConfig } from "./config.ts";
+import { REACHABILITY_FETCH_TIMEOUT_MS } from "./constants.ts";
 import {
 	buildGeneratedModelsJson,
 	getGeneratedModelsPath,
@@ -62,7 +63,10 @@ export function registerCommands(pi: ExtensionAPI, state: ProviderRuntimeState):
 
 			// Reachability is advisory: authenticated gateways may reject this probe, so setup still proceeds.
 			try {
-				const response = await fetchWithTimeout(`${baseUrl}/v1/models`, { signal: ctx.signal });
+				const response = await fetchWithTimeout(`${baseUrl}/v1/models`, {
+					signal: ctx.signal,
+					timeoutMs: REACHABILITY_FETCH_TIMEOUT_MS,
+				});
 				if (!response.ok && response.status !== 401 && response.status !== 403) {
 					ctx.ui.notify(
 						`Warning: ${baseUrl} responded ${response.status} ${response.statusText}. Saving anyway.`,

@@ -3,6 +3,7 @@
 import type { Api, Model, RefreshModelsContext } from "@earendil-works/pi-ai";
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { readConfig } from "./config.ts";
+import { RATIO_CONFIG_FETCH_TIMEOUT_MS } from "./constants.ts";
 import { fetchWithTimeout, NewAPIError } from "./http.ts";
 import { buildProviderModels, parseModelsResponse, parseRatioConfig } from "./models.ts";
 import { EMPTY_RATIOS } from "./types.ts";
@@ -28,7 +29,10 @@ export async function refreshProviderModels(
 		// Ratio metadata improves cost reporting but is not required for model discovery.
 		let ratios = EMPTY_RATIOS;
 		try {
-			const ratioResponse = await fetchWithTimeout(`${baseUrl}/api/ratio_config`, { signal: context.signal });
+			const ratioResponse = await fetchWithTimeout(`${baseUrl}/api/ratio_config`, {
+				signal: context.signal,
+				timeoutMs: RATIO_CONFIG_FETCH_TIMEOUT_MS,
+			});
 			if (ratioResponse.ok) ratios = parseRatioConfig(await ratioResponse.json());
 		} catch (err) {
 			if (err instanceof NewAPIError && err.code === "aborted") throw err;
