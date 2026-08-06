@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning.
 
+## [Unreleased]
+
+### Changed
+
+- Refactored the extension into focused `src/` modules while retaining the root `index.ts` Pi entry point and stable startup display name.
+- Split tests into focused suites under `test/` and kept internal model helpers private to the package implementation.
+
 ## [0.4.0] - 2026-06-06
 
 ### Added
