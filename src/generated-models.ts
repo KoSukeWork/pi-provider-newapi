@@ -1,3 +1,5 @@
+/** Builds and writes copy-ready Pi modelOverrides templates for unknown NewAPI models. */
+
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -29,6 +31,7 @@ export function buildGeneratedModelsJson(
 	const configured = new Set(providerNames);
 	const modelsByProvider = new Map<string, Set<string>>();
 
+	// Enriched models already inherit Pi metadata; only unknown models need editable templates.
 	for (const model of models) {
 		if (!configured.has(model.provider) || isEnrichedModelId(model.id)) continue;
 		const ids = modelsByProvider.get(model.provider) ?? new Set<string>();
@@ -36,6 +39,7 @@ export function buildGeneratedModelsJson(
 		modelsByProvider.set(model.provider, ids);
 	}
 
+	// Stable provider and model ordering keeps regenerated files easy to compare and merge.
 	for (const providerName of [...configured].sort()) {
 		const ids = modelsByProvider.get(providerName);
 		if (!ids || ids.size === 0) continue;

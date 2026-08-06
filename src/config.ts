@@ -1,3 +1,5 @@
+/** Reads, normalizes, and atomically updates extension-owned provider configuration. */
+
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -12,6 +14,7 @@ export function getConfigPath(): string {
 const emittedConfigWarnings = new Set<string>();
 
 export function readConfig(): NewAPIConfig {
+	// Resolve legacy path and schema versions before interpreting the current config shape.
 	const { path: configPath } = migrateConfig(getConfigPath());
 	const empty: NewAPIConfig = { version: CONFIG_SCHEMA_VERSION, providers: {}, settings: {} };
 
@@ -33,6 +36,7 @@ export function readConfig(): NewAPIConfig {
 		return empty;
 	}
 
+	// A valid top-level providers map is the minimum recoverable configuration shape.
 	if (
 		typeof data !== "object" ||
 		data === null ||
@@ -45,6 +49,7 @@ export function readConfig(): NewAPIConfig {
 	}
 
 	const parsed = data as Record<string, unknown>;
+	// Normalize untrusted JSON to current fields while migration reports removed legacy fields.
 	const providers: Record<string, ProviderEntry> = {};
 	for (const [name, rawEntry] of Object.entries(parsed.providers as Record<string, unknown>)) {
 		if (typeof rawEntry !== "object" || rawEntry === null) continue;
@@ -58,6 +63,7 @@ export function readConfig(): NewAPIConfig {
 					modelApiOverrides[pattern] = api as NewAPIModelApi;
 					continue;
 				}
+				// Refreshes reread this file often, so report each invalid rule only once per process.
 				const warningKey = `unsupported-api:${name}:${pattern}`;
 				if (!emittedConfigWarnings.has(warningKey)) {
 					emittedConfigWarnings.add(warningKey);
@@ -90,6 +96,7 @@ export function readConfig(): NewAPIConfig {
 }
 
 function invalidateConfig(configPath: string, raw: string): void {
+	// Preserve the unreadable payload before restoring a known-valid empty configuration.
 	const backupPath = `${configPath}.bak`;
 	console.warn(`NewAPI: config is invalid — backing up to ${backupPath} and starting with empty config.`);
 	try {

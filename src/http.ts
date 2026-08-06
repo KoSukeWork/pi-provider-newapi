@@ -1,3 +1,5 @@
+/** Provides typed, timeout- and cancellation-aware HTTP requests for NewAPI discovery. */
+
 import { FETCH_TIMEOUT_MS } from "./constants.ts";
 
 export type NewAPIErrorCode = "aborted" | "timeout" | "auth" | "http" | "payload" | "network";
@@ -28,6 +30,7 @@ export async function fetchWithTimeout(
 	const combined =
 		typeof AbortSignal.any === "function" ? AbortSignal.any(signals) : timeoutController.signal;
 
+	// Older runtimes without AbortSignal.any bridge upstream cancellation into the timeout controller.
 	let bridge: (() => void) | undefined;
 	if (typeof AbortSignal.any !== "function" && upstream) {
 		bridge = () => timeoutController.abort();
@@ -37,6 +40,7 @@ export async function fetchWithTimeout(
 	try {
 		return await fetch(url, { ...fetchOptions, signal: combined });
 	} catch (err) {
+		// Preserve cancellation vs timeout vs network failure so refresh can choose the right fallback.
 		if (upstream?.aborted) throw new NewAPIError("aborted", `fetch(${url}) cancelled`);
 		if (timeoutController.signal.aborted) {
 			throw new NewAPIError("timeout", `fetch(${url}) timed out after ${timeoutMs / 1000}s`);

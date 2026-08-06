@@ -1,3 +1,5 @@
+/** Verifies defensive parsing of NewAPI model and ratio responses. */
+
 import assert from "node:assert/strict";
 import { test } from "node:test";
 

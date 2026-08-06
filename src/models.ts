@@ -1,3 +1,5 @@
+/** Parses, enriches, routes, and prices NewAPI model definitions for Pi. */
+
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { getModels, type BuiltinProvider } from "@earendil-works/pi-ai/compat";
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
@@ -32,6 +34,7 @@ export function calcCacheCost(modelRate: number, ratio: number): number {
 }
 
 export function findRatio(modelId: string, ratios: Record<string, number>): number | undefined {
+	// Prefer exact keys, then tolerate casing differences and dated model suffixes.
 	if (modelId in ratios) return ratios[modelId];
 	const lower = modelId.toLowerCase();
 	for (const [key, value] of Object.entries(ratios)) {
@@ -61,6 +64,7 @@ function getEnrichmentLookup(): Map<string, ModelLookupItem> {
 			if (!SUPPORTED_NEWAPI_MODEL_APIS.has(model.api as NewAPIModelApi)) continue;
 			const stripped = model.id.includes("/") ? model.id.slice(model.id.indexOf("/") + 1) : model.id;
 			const normalizedId = stripped.replaceAll(".", "-").toLowerCase();
+			// Provider order is intentional: the first matching built-in model supplies metadata.
 			if (lookup.has(normalizedId)) continue;
 
 			lookup.set(normalizedId, {
@@ -96,6 +100,7 @@ export function compileModelApiOverrides(overrides: Record<string, string>): {
 } {
 	const rules: ModelApiOverrideRule[] = [];
 	const errors: string[] = [];
+	// Object insertion order defines rule priority, so retain it while compiling regexes.
 	for (const [pattern, api] of Object.entries(overrides)) {
 		if (!SUPPORTED_NEWAPI_MODEL_APIS.has(api as NewAPIModelApi)) {
 			errors.push(`pattern "${pattern}" uses unsupported API "${api}"`);
@@ -111,6 +116,7 @@ export function compileModelApiOverrides(overrides: Record<string, string>): {
 }
 
 function pickModelApi(preferred: Api | undefined, gatewayApis: Set<NewAPIModelApi>): NewAPIModelApi {
+	// Keep enriched metadata when the gateway does not contradict it.
 	if (
 		preferred &&
 		SUPPORTED_NEWAPI_MODEL_APIS.has(preferred as NewAPIModelApi) &&
@@ -118,6 +124,7 @@ function pickModelApi(preferred: Api | undefined, gatewayApis: Set<NewAPIModelAp
 	) {
 		return preferred as NewAPIModelApi;
 	}
+	// Otherwise select the best API explicitly advertised by NewAPI.
 	for (const api of API_PREFERENCE) {
 		if (gatewayApis.has(api)) return api;
 	}
@@ -191,6 +198,7 @@ export function buildProviderModels(params: {
 		for (const type of modelEntry.supportedEndpointTypes) {
 			for (const candidate of ENDPOINT_TYPE_TO_APIS[type] ?? []) gatewayApis.add(candidate);
 		}
+		// User regex routing is authoritative; enrichment and advertised endpoints are fallbacks.
 		const apiOverride = rules.find((rule) => rule.regex.test(modelEntry.id))?.api;
 		let name = modelEntry.id;
 		let reasoning = false;
@@ -202,6 +210,7 @@ export function buildProviderModels(params: {
 		let compat: Model<Api>["compat"] | undefined;
 
 		if (enriched) {
+			// Known models inherit Pi's capabilities and compatibility metadata.
 			name = enriched.model.name ?? modelEntry.id;
 			compat = enriched.model.compat;
 			reasoning = enriched.model.reasoning;
@@ -217,6 +226,7 @@ export function buildProviderModels(params: {
 				);
 			}
 		} else {
+			// Unknown models remain usable with conservative defaults and generated override templates.
 			api = apiOverride ?? pickModelApi(undefined, gatewayApis);
 		}
 

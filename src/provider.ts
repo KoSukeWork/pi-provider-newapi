@@ -1,3 +1,5 @@
+/** Registers configured NewAPI gateways as dynamic Pi model providers. */
+
 import { getProviders } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { refreshProviderModels } from "./discovery.ts";
@@ -13,6 +15,7 @@ export function registerNewAPIProvider(pi: ExtensionAPI, name: string, entry: Pr
 		name: `NewAPI (${name})`,
 		baseUrl: entry.baseUrl.replace(/\/+$/, ""),
 		api: DEFAULT_MODEL_API,
+		// The empty startup catalog makes /login available before authenticated discovery runs.
 		models: [],
 		async refreshModels(context) {
 			return refreshProviderModels(name, context);
@@ -27,6 +30,7 @@ export function registerConfiguredProviders(
 ): void {
 	const builtinProviderIds = getProviders() as unknown as string[];
 	for (const [name, entry] of Object.entries(config.providers)) {
+		// Invalid or colliding entries are isolated so other configured gateways still register.
 		if (builtinProviderIds.includes(name)) {
 			console.warn(`NewAPI: skipping provider "${name}" — name collides with a built-in pi provider.`);
 			continue;

@@ -1,3 +1,5 @@
+/** Composes provider startup, onboarding warnings, and command registration for the extension. */
+
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readConfig, updateConfig } from "./config.ts";
 import { ONBOARDING_WARN_MAX } from "./constants.ts";
@@ -11,6 +13,7 @@ export default async function newApiExtension(pi: ExtensionAPI): Promise<void> {
 	registerConfiguredProviders(pi, config, state);
 
 	if (state.registered.size === 0) {
+		// Persist a countdown so an unconfigured installation warns only on its first few starts.
 		const countdown = config.settings.onboardingWarnCountdown ?? ONBOARDING_WARN_MAX;
 		if (countdown > 0) {
 			console.warn("NewAPI: no providers configured. Run /newapi-provider-add to add a NewAPI gateway.");

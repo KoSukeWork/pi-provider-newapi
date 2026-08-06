@@ -1,3 +1,5 @@
+/** Discovers NewAPI models and maintains Pi's provider-scoped catalog cache. */
+
 import type { Api, Model, RefreshModelsContext } from "@earendil-works/pi-ai";
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { readConfig } from "./config.ts";
@@ -16,6 +18,7 @@ export async function refreshProviderModels(
 
 	const cached = await context.store.read();
 	const cachedModels = (cached?.models ?? []) as unknown as ProviderModelConfig[];
+	// Offline startup and cancelled refreshes must never discard the last usable catalog.
 	if (!context.allowNetwork || context.signal?.aborted) return cachedModels;
 
 	const credential = context.credential;
@@ -23,6 +26,7 @@ export async function refreshProviderModels(
 
 	try {
 		const baseUrl = entry.baseUrl.replace(/\/+$/, "");
+		// Ratio metadata improves cost reporting but is not required for model discovery.
 		let ratios = EMPTY_RATIOS;
 		try {
 			const ratioResponse = await fetchWithTimeout(`${baseUrl}/api/ratio_config`, { signal: context.signal });
@@ -58,6 +62,7 @@ export async function refreshProviderModels(
 			modelApiOverrides: entry.modelApiOverrides ?? {},
 		});
 
+		// Treat a transient empty response as a failed refresh when a prior catalog exists.
 		if (models.length === 0 && cachedModels.length > 0) {
 			console.warn(`NewAPI [${providerName}]: /v1/models returned zero models — keeping cached catalog.`);
 			return cachedModels;
@@ -69,6 +74,7 @@ export async function refreshProviderModels(
 		});
 		return models;
 	} catch (err) {
+		// Discovery failures are isolated to this refresh; Pi can continue with cached models.
 		if (err instanceof NewAPIError && err.code === "aborted") return cachedModels;
 		console.warn(
 			`NewAPI [${providerName}]: refresh failed — ${err instanceof Error ? err.message : String(err)}` +

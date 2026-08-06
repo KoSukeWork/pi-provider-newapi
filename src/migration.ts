@@ -1,3 +1,5 @@
+/** Detects and migrates extension configuration paths and schema versions. */
+
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -39,6 +41,7 @@ function readSchemaVersion(path: string): number {
 /** Detect the active config location and its on-disk schema version as one value. */
 export function getConfigVersion(configPath = getCurrentConfigPath()): ConfigVersion {
 	const legacyPath = getLegacyConfigPath();
+	// The canonical location wins when both files exist; otherwise detect the legacy source.
 	const path = existsSync(configPath) || !existsSync(legacyPath) ? configPath : legacyPath;
 	return { path, schemaVersion: readSchemaVersion(path) };
 }
@@ -47,6 +50,7 @@ export function getConfigVersion(configPath = getCurrentConfigPath()): ConfigVer
 export function migrateConfig(configPath = getCurrentConfigPath()): ConfigVersion {
 	let version = getConfigVersion(configPath);
 	const legacyPath = getLegacyConfigPath();
+	// Never overwrite a canonical config with a stale legacy copy.
 	if (version.path !== legacyPath) {
 		if (existsSync(configPath) && existsSync(legacyPath)) {
 			warnMigrationOnce(
@@ -55,6 +59,7 @@ export function migrateConfig(configPath = getCurrentConfigPath()): ConfigVersio
 			);
 		}
 	} else {
+		// Move the legacy file first so every later schema write targets the canonical directory.
 		try {
 			const dir = dirname(configPath);
 			if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -77,6 +82,7 @@ export function migrateConfig(configPath = getCurrentConfigPath()): ConfigVersio
 		}
 	}
 
+	// Pre-versioned files are schema 0; stamp the current envelope without altering their payload.
 	if (version.schemaVersion < CONFIG_SCHEMA_VERSION && existsSync(version.path)) {
 		try {
 			const parsed = JSON.parse(readFileSync(version.path, "utf-8")) as unknown;
@@ -99,6 +105,7 @@ export function migrateConfig(configPath = getCurrentConfigPath()): ConfigVersio
 		}
 	}
 
+	// Refuse to downgrade an unknown future schema, which could destroy fields this version cannot parse.
 	if (version.schemaVersion > CONFIG_SCHEMA_VERSION) {
 		throw new Error(
 			`NewAPI: config schema version ${version.schemaVersion} at ${version.path} is newer than supported ` +

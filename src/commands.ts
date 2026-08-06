@@ -1,3 +1,5 @@
+/** Registers commands for managing NewAPI providers and generating Pi model override templates. */
+
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { getProviders } from "@earendil-works/pi-ai/compat";
@@ -58,6 +60,7 @@ export function registerCommands(pi: ExtensionAPI, state: ProviderRuntimeState):
 				return;
 			}
 
+			// Reachability is advisory: authenticated gateways may reject this probe, so setup still proceeds.
 			try {
 				const response = await fetchWithTimeout(`${baseUrl}/v1/models`, { signal: ctx.signal });
 				if (!response.ok && response.status !== 401 && response.status !== 403) {
@@ -99,6 +102,7 @@ export function registerCommands(pi: ExtensionAPI, state: ProviderRuntimeState):
 			}
 
 			ctx.ui.notify("Reloading available NewAPI models before generating templates...", "info");
+			// A failed refresh is non-fatal because the registry may still hold a usable cached catalog.
 			let refreshError: string | undefined;
 			try {
 				await ctx.modelRegistry.refresh();
@@ -171,6 +175,7 @@ export function registerCommands(pi: ExtensionAPI, state: ProviderRuntimeState):
 				return;
 			}
 
+			// Pi owns credentials, so provider removal can only warn about a separate /logout step.
 			const status = ctx.modelRegistry.getProviderAuthStatus(name);
 			const credentialNote = status.configured
 				? `A Pi credential is still configured for "${name}". Run /logout ${name} to remove it — this command does not edit auth.json.\n\n`

@@ -1,3 +1,5 @@
+/** Verifies ratio lookup fallbacks and cache-cost conversion. */
+
 import assert from "node:assert/strict";
 import { test } from "node:test";
 

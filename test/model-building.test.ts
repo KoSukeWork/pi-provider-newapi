@@ -1,3 +1,5 @@
+/** Verifies model enrichment, API routing, defaults, compatibility, and pricing. */
+
 import assert from "node:assert/strict";
 import { test } from "node:test";
 

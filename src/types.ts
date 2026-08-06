@@ -1,3 +1,5 @@
+/** Shared contracts for configuration, discovery payloads, ratios, and model enrichment. */
+
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 export type NewAPIModelApi = Extract<Api, "anthropic-messages" | "openai-completions" | "openai-responses">;
