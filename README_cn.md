@@ -64,6 +64,7 @@ pi> /login my_gateway
 | `/newapi-provider-remove [name]` | 注销 provider 并删除扩展配置；请先运行 `/logout <name>`。 |
 | `/newapi-provider-list` | 显示各 provider 的地址、认证状态、API 覆盖数量和启用状态。 |
 | `/newapi-generate-models-json` | 为已经发现但 pi 尚不认识的模型生成可编辑的 `modelOverrides` 模板。 |
+| `/newapi-config-recover` | 从配置备份中恢复设置，并将 `models-generated.json` 合并到 pi 的 `models.json`，然后确认清理和重新加载。 |
 
 ### 移除 provider
 
@@ -118,7 +119,7 @@ Pi 尚未通过扩展 API 提供凭据删除能力。若要同时移除凭据和
 - **`version`** 是配置 schema 的唯一判定依据。缺少该字段或值为 `0` 时使用 schema `0`；值为 `1` 时使用当前 schema。Schema 校验不会改变这一判定。无效字段会按完整路径报告；声明了更高 schema 版本的文件会原样保留并拒绝加载，直到扩展完成升级。
 - **`providers`** 为每个 NewAPI 网关保存一个条目。键名就是 pi 中显示的 provider ID。
 - **`baseUrl`** 是不含 `/v1` 的网关根地址；末尾的斜杠会自动移除。
-- **`modelApiOverrides`** 将 JavaScript 正则表达式映射到 pi API。规则按 JSON 中的顺序匹配，首个命中项生效。可用值为 `anthropic-messages`、`openai-completions` 和 `openai-responses`。无效的正则会被忽略并输出警告；不支持的 API 值无法通过 schema 校验，并会触发下文所述的时间戳配置备份。
+- **`modelApiOverrides`** 为可选字段；省略它等同于使用空对象。存在时，它会将 JavaScript 正则表达式映射到 pi API。规则按 JSON 中的顺序匹配，首个命中项生效。可用值为 `anthropic-messages`、`openai-completions` 和 `openai-responses`。无效的正则会被忽略并输出警告；不支持的 API 值无法通过 schema 校验，并会触发下文所述的时间戳配置备份。
 - **`settings.onboardingWarnCountdown`** 是内部状态，用于将未配置 provider 的提醒限制为三次启动。
 
 ### API 路由
@@ -177,7 +178,13 @@ Pi 会在模型发现完成后，按精确模型 ID 应用这些覆盖。Provide
 
 首次使用时，已有的 `<agentDir>/extensions/provider-newapi.json` 会从旧目录移走，并在 `extension-settings` 下归档为 `provider-newapi.YYMMDD-HHMMSS.json.bak`；支持的配置项会迁移到新建的标准配置文件中。迁移 schema `0` 配置前也会创建同样的时间戳备份。Schema `0` 包含旧的 `modelOverrides` 字段；请将备份中的模型元数据和兼容性设置迁移到 pi 的 `models.json`，并将旧的 API 选择迁移到 `modelApiOverrides`。声明版本为 `1` 的文件始终按 schema `1` 校验，其中的 v0 专属字段会作为校验错误报告，而不会导致文件被重新判定为 v0。
 
-如果 JSON 解析或顶层配置校验失败，无效文件会移动为同样格式的时间戳备份，并替换为有效的空配置。
+如果 JSON 解析或配置 schema 校验失败，无效文件会移动为同样格式的时间戳备份，并替换为有效的空配置。每当创建备份时，警告都会使用以下恢复指引：
+
+```text
+Run /newapi-config-recover to recover settings from config backups.
+```
+
+该提示模板会检查有效、旧版以及损坏的备份，并在不覆盖现有值的前提下，将 `models-generated.json` 模板合并到 pi 的 `models.json`。它会合并可恢复的扩展设置和由 pi 管理的模型覆盖，并保留有歧义的片段供人工检查。它不会立即删除备份。完成协调后，它会列出已恢复的备份，并在删除这些明确列出的文件及提示运行 `/reload` 前请求用户明确确认。
 
 ## 多网关
 

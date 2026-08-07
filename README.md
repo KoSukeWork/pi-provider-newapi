@@ -64,6 +64,7 @@ Pi stores the credential through its configured credential store, normally `<age
 | `/newapi-provider-remove [name]` | Unregister the provider and remove its extension configuration. Run `/logout <name>` first. |
 | `/newapi-provider-list` | Show each configured provider's URL, authentication status, API override count, and active state. |
 | `/newapi-generate-models-json` | Generate editable pi `modelOverrides` templates for discovered models that pi does not already know. |
+| `/newapi-config-recover` | Recover settings from config backups and merge `models-generated.json` into Pi's `models.json`, then confirm cleanup and reload. |
 
 ### Removing a provider
 
@@ -118,7 +119,7 @@ The add and remove commands manage `<agentDir>/extension-settings/provider-newap
 - **`version`** is the sole configuration schema discriminator. A missing value or `0` selects schema `0`; `1` selects the current schema. Schema validation never changes that selection. Invalid fields are reported by their full paths, while files declaring a newer schema are preserved and rejected until the extension is upgraded.
 - **`providers`** contains one entry per NewAPI gateway. Each key becomes the provider ID shown by pi.
 - **`baseUrl`** is the gateway root URL, without `/v1`. Trailing slashes are removed automatically.
-- **`modelApiOverrides`** maps JavaScript regular expressions to pi APIs. Rules are checked in JSON order, and the first match wins. Supported values are `anthropic-messages`, `openai-completions`, and `openai-responses`. Invalid regular expressions are ignored with a warning; unsupported API values fail schema validation and trigger the timestamped config backup described below.
+- **`modelApiOverrides`** is optional; omitting it is equivalent to an empty object. When present, it maps JavaScript regular expressions to pi APIs. Rules are checked in JSON order, and the first match wins. Supported values are `anthropic-messages`, `openai-completions`, and `openai-responses`. Invalid regular expressions are ignored with a warning; unsupported API values fail schema validation and trigger the timestamped config backup described below.
 - **`settings.onboardingWarnCountdown`** is internal state that limits the no-provider reminder to three startups.
 
 ### API routing
@@ -177,7 +178,13 @@ The default `<agentDir>` is:
 
 On first use, an existing `<agentDir>/extensions/provider-newapi.json` is moved out of the legacy directory and archived under `extension-settings` as `provider-newapi.YYMMDD-HHMMSS.json.bak`; supported settings are migrated into a new canonical config. The same timestamped backup is created before migrating schema `0` files. Schema `0` includes the former `modelOverrides` field: move its metadata and compatibility values from the backup into pi's `models.json`, and move old API choices into `modelApiOverrides`. A file declaring version `1` is always validated as schema `1`; v0-only fields in it are validation errors rather than a reason to reclassify it.
 
-If JSON parsing or top-level config validation fails, the invalid file is moved to the same timestamped backup format and replaced with a valid empty configuration.
+If JSON parsing or config schema validation fails, the invalid file is moved to the same timestamped backup format and replaced with a valid empty configuration. Whenever a backup is created, the warning uses this recovery instruction:
+
+```text
+Run /newapi-config-recover to recover settings from config backups.
+```
+
+The prompt examines valid, legacy, and malformed backups, and merges `models-generated.json` templates into Pi's `models.json` without overwriting existing values. It merges recoverable extension settings and Pi-owned model overrides, and preserves ambiguous fragments for manual review. It does not delete backups immediately. After reconciliation, it lists the recovered backups and asks for explicit confirmation before deleting those exact files and directing you to run `/reload`.
 
 ## Multiple gateways
 
