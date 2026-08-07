@@ -2,22 +2,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 
-export type NewAPIModelApi = Extract<Api, "anthropic-messages" | "openai-completions" | "openai-responses">;
-
-export interface ProviderEntry {
-	baseUrl: string;
-	modelApiOverrides: Record<string, NewAPIModelApi>;
-}
-
-export interface Settings {
-	onboardingWarnCountdown?: number;
-}
-
-export interface NewAPIConfig {
-	version: 1;
-	providers: Record<string, ProviderEntry>;
-	settings: Settings;
-}
+export type { NewAPIConfig, NewAPIModelApi, ProviderEntry, Settings } from "./config-schema.ts";
 
 export interface NewAPIModelEntry {
 	/** Model ID, e.g. "claude-opus-4-7". */
