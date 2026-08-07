@@ -115,10 +115,10 @@ The add and remove commands manage `<agentDir>/extension-settings/provider-newap
 }
 ```
 
-- **`version`** is the extension configuration schema version. The current version is `1`. Pre-versioned files are upgraded automatically; files created by a newer schema are preserved and rejected until the extension is upgraded.
+- **`version`** is the sole configuration schema discriminator. A missing value or `0` selects schema `0`; `1` selects the current schema. Schema validation never changes that selection. Invalid fields are reported by their full paths, while files declaring a newer schema are preserved and rejected until the extension is upgraded.
 - **`providers`** contains one entry per NewAPI gateway. Each key becomes the provider ID shown by pi.
 - **`baseUrl`** is the gateway root URL, without `/v1`. Trailing slashes are removed automatically.
-- **`modelApiOverrides`** maps JavaScript regular expressions to pi APIs. Rules are checked in JSON order, and the first match wins. Supported values are `anthropic-messages`, `openai-completions`, and `openai-responses`. Invalid patterns or values are ignored with a warning.
+- **`modelApiOverrides`** maps JavaScript regular expressions to pi APIs. Rules are checked in JSON order, and the first match wins. Supported values are `anthropic-messages`, `openai-completions`, and `openai-responses`. Invalid regular expressions are ignored with a warning; unsupported API values fail schema validation and trigger the timestamped config backup described below.
 - **`settings.onboardingWarnCountdown`** is internal state that limits the no-provider reminder to three startups.
 
 ### API routing
@@ -175,7 +175,9 @@ The default `<agentDir>` is:
 | Linux / macOS | `~/.pi/agent` |
 | Windows | `%USERPROFILE%\.pi\agent` |
 
-On first use, an existing `<agentDir>/extensions/provider-newapi.json` is moved to the new `extension-settings` directory. If the configuration is malformed, the extension backs it up as `provider-newapi.json.bak` and replaces it with a valid empty configuration.
+On first use, an existing `<agentDir>/extensions/provider-newapi.json` is moved out of the legacy directory and archived under `extension-settings` as `provider-newapi.YYMMDD-HHMMSS.json.bak`; supported settings are migrated into a new canonical config. The same timestamped backup is created before migrating schema `0` files. Schema `0` includes the former `modelOverrides` field: move its metadata and compatibility values from the backup into pi's `models.json`, and move old API choices into `modelApiOverrides`. A file declaring version `1` is always validated as schema `1`; v0-only fields in it are validation errors rather than a reason to reclassify it.
+
+If JSON parsing or top-level config validation fails, the invalid file is moved to the same timestamped backup format and replaced with a valid empty configuration.
 
 ## Multiple gateways
 

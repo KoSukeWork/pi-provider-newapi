@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Changed unknown-model defaults to a 128,000-token context window and 32,768 maximum output tokens.
 - Pi now applies all user model metadata and compatibility patches after dynamic NewAPI model discovery.
 - Moved extension configuration from `<agentDir>/extensions/` to `<agentDir>/extension-settings/`; unified path/schema detection through `getConfigVersion()` and added top-level schema `version: 1`, with automatic migration for existing configuration.
+- Config JSON is now validated during deserialization with explicit TypeBox schemas for versions `0` and `1`, selected solely by the declared `version` field, with field-specific validation errors. Legacy-path, schema `0`, and invalid configuration files are moved to timestamped `extension-settings/provider-newapi.YYMMDD-HHMMSS.json.bak` archives. Schema `0` includes the removed `modelOverrides` field, and its v0-to-v1 migration warning directs users to move those values into Pi's `models.json`.
 - Replaced the shared 3-second HTTP timeout with endpoint-specific limits: 15 seconds for model discovery, 10 seconds for optional ratio metadata, and 5 seconds for the add-provider reachability check.
 
 ### Removed

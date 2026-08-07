@@ -30,8 +30,9 @@ Node's strip-only TS loader powers `npm test`: **no TS-only runtime syntax** (no
 
 Data flow: **config + Pi credential → discover → enrich → route API → build model configs → register/persist.**
 
-- **`config.ts`** (`readConfig`/`writeConfigAtomic`/`updateConfig`): stores configuration at `<agentDir>/extension-settings/provider-newapi.json` as `{ version, providers: { <name>: { baseUrl, modelApiOverrides } }, settings }`. `updateConfig` is a serialized read-modify-write (module-level promise queue) with atomic temp-file+rename, so concurrent provider setup operations never clobber each other's entries. Malformed config is backed up to `.bak` and reset.
-- **`migration.ts`**: owns legacy configuration compatibility. `getConfigVersion()` unifies the active path and on-disk schema version; migration moves `<agentDir>/extensions/provider-newapi.json`, upgrades pre-versioned schema `0` files to schema `1`, and warns about removed extension-owned model overrides.
+- **`config-schema.ts`**: defines strict TypeBox schemas for config versions `0` and `1`, exports their inferred TypeScript types, and selects the schema solely from the declared `version` field during JSON deserialization. Validation errors identify full field paths.
+- **`config.ts`** (`readConfig`/`writeConfigAtomic`/`updateConfig`): stores configuration at `<agentDir>/extension-settings/provider-newapi.json` as `{ version, providers: { <name>: { baseUrl, modelApiOverrides } }, settings }`. `updateConfig` is a serialized read-modify-write (module-level promise queue) with atomic temp-file+rename, so concurrent provider setup operations never clobber each other's entries. Invalid config is moved to a timestamped `.json.bak` and reset.
+- **`migration.ts`**: owns legacy configuration compatibility. `getConfigVersion()` unifies the active path and on-disk schema version; migration archives `<agentDir>/extensions/provider-newapi.json`, upgrades TypeBox schema `0` files to schema `1`, and includes removed `modelOverrides` guidance in the v0-to-v1 migration warning.
 - **`http.ts`** (`fetchWithTimeout`): combines a local timeout with `context.signal` via `AbortSignal.any`; throws a `NewAPIError` tagged `aborted | timeout | auth | http | payload | network`.
 - **`models.ts`** (pure, exported, tested): parses `/v1/models` and ratio configuration, enriches models from Pi's built-in catalog, applies regex `modelApiOverrides`, computes costs, and builds provider model configs. Metadata and compatibility overrides belong to Pi's `models.json`.
 - **`generated-models.ts`**: builds unknown-model `modelOverrides` templates and atomically writes `<agentDir>/models-generated.json`; it never edits Pi's user-owned `models.json`.
@@ -50,6 +51,6 @@ Data flow: **config + Pi credential → discover → enrich → route API → bu
 
 ## Conventions
 
-- Tabs for indentation; keep the file dependency-free beyond the two pi peer packages + Node built-ins.
+- Tabs for indentation; TypeBox is the only direct runtime dependency beyond the two pi peer packages + Node built-ins.
 - Extract pure, deterministic logic as exported functions and unit-test it; keep I/O (fetch, fs, Pi APIs) thin.
 - Keep `package.json` `version` and the top `CHANGELOG.md` entry in sync; update both READMEs (`README.md` + `README_cn.md`) when user-facing behavior changes.
