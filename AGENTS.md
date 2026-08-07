@@ -7,8 +7,8 @@
 ## Commands
 
 ```bash
-npm run typecheck   # tsc --noEmit (checks index.ts, src/, and test/)
-npm test            # node --test (discovers test/*.test.ts via Node's TS strip-only loader)
+pnpm run typecheck  # tsc --noEmit (checks index.ts, src/, and test/)
+pnpm test           # node --test (discovers test/*.test.ts via Node's TS strip-only loader)
 ```
 
 Interactive smoke test against the source checkout (needs a TTY; will hang in non-interactive shells):
@@ -52,6 +52,7 @@ Data flow: **config + Pi credential → discover → enrich → route API → bu
 
 ## Conventions
 
+- Use pnpm for all package operations, including dependency management, scripts, versioning, packing, and publishing; do not use npm for release operations.
 - Tabs for indentation; TypeBox is the only direct runtime dependency beyond the two pi peer packages + Node built-ins.
 - Extract pure, deterministic logic as exported functions and unit-test it; keep I/O (fetch, fs, Pi APIs) thin.
 - Keep `package.json` `version` and the top `CHANGELOG.md` entry in sync; update both READMEs (`README.md` + `README_cn.md`) when user-facing behavior changes.
