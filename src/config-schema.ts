@@ -15,7 +15,7 @@ const ModelApiOverridesSchema = Type.Record(Type.String(), ModelApiSchema);
 const ProviderV1Schema = Type.Object(
 	{
 		baseUrl: Type.String(),
-		modelApiOverrides: ModelApiOverridesSchema,
+		modelApiOverrides: Type.Optional(ModelApiOverridesSchema),
 	},
 	{ additionalProperties: false },
 );

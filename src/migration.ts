@@ -110,11 +110,8 @@ function migrateCandidate(candidate: ParsedConfig): NewAPIConfig {
 	};
 }
 
-function v0MigrationGuidance(): string {
-	return (
-		` Schema v0 modelOverrides are not copied: move model metadata and compatibility overrides into Pi's ` +
-		`${join(getAgentDir(), "models.json")}, and move old API choices into modelApiOverrides.`
-	);
+function configRecoveryGuidance(): string {
+	return " Run /newapi-config-recover to recover settings from config backups.";
 }
 
 /** Archive an invalid config and replace it with a valid empty canonical config. */
@@ -126,7 +123,8 @@ export function resetInvalidConfig(configPath = getCurrentConfigPath(), reason?:
 		console.warn(
 			`NewAPI: config at ${configPath} is invalid${detail}.` +
 				(backupPath ? ` Moved it to ${backupPath}` : "") +
-				" and created an empty config.",
+				" and created an empty config." +
+				(backupPath ? configRecoveryGuidance() : ""),
 		);
 	} catch (error) {
 		console.warn(
@@ -149,7 +147,8 @@ function archiveLegacyPath(legacyPath: string, configPath: string): void {
 	if (existsSync(configPath)) {
 		console.warn(
 			`NewAPI: moved legacy config from ${legacyPath} to ${backupPath}; ` +
-				`the existing config at ${configPath} remains authoritative.`,
+				`the existing config at ${configPath} remains authoritative.` +
+				configRecoveryGuidance(),
 		);
 		return;
 	}
@@ -159,7 +158,8 @@ function archiveLegacyPath(legacyPath: string, configPath: string): void {
 		console.warn(
 			`NewAPI: legacy config at ${legacyPath} is invalid` +
 				`${parseError instanceof Error ? `: ${parseError.message}` : ""}. ` +
-				`Moved it to ${backupPath} and created an empty config at ${configPath}.`,
+				`Moved it to ${backupPath} and created an empty config at ${configPath}.` +
+				configRecoveryGuidance(),
 		);
 		return;
 	}
@@ -167,14 +167,15 @@ function archiveLegacyPath(legacyPath: string, configPath: string): void {
 	if (candidate.schemaVersion > CONFIG_SCHEMA_VERSION) {
 		throw new Error(
 			`NewAPI: legacy config schema version ${candidate.schemaVersion} was moved to ${backupPath} and is newer ` +
-				`than supported version ${CONFIG_SCHEMA_VERSION}. Upgrade the extension before migrating it.`,
+				`than supported version ${CONFIG_SCHEMA_VERSION}. Upgrade the extension before migrating it.` +
+				configRecoveryGuidance(),
 		);
 	}
 
 	writeConfigAt(configPath, migrateCandidate(candidate));
 	console.warn(
 		`NewAPI: moved legacy config from ${legacyPath} to ${backupPath} and migrated it to ${configPath}.` +
-			(candidate.kind === "v0" ? v0MigrationGuidance() : ""),
+			configRecoveryGuidance(),
 	);
 }
 
@@ -205,7 +206,7 @@ export function migrateConfig(configPath = getCurrentConfigPath()): ConfigVersio
 		console.warn(
 			`NewAPI: moved schema ${candidate.schemaVersion} config to ${backupPath} and migrated ${configPath} ` +
 				`to schema ${CONFIG_SCHEMA_VERSION}.` +
-				v0MigrationGuidance(),
+				configRecoveryGuidance(),
 		);
 	}
 

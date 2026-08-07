@@ -14,7 +14,8 @@
     "@earendil-works/pi-coding-agent": ">=0.84.0"
   },
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": ["./index.ts"],
+    "prompts": ["./prompts"]
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -106,11 +106,21 @@ test("readConfig: archives malformed JSON and creates an empty config", () =>
 		const malformed = '{"providers":';
 		writeFileSync(path, malformed);
 
-		assert.deepEqual(readConfig(), {
+		const warnings: string[] = [];
+		const originalWarn = console.warn;
+		console.warn = (...values: unknown[]) => warnings.push(values.map(String).join(" "));
+		let config: ReturnType<typeof readConfig>;
+		try {
+			config = readConfig();
+		} finally {
+			console.warn = originalWarn;
+		}
+		assert.deepEqual(config, {
 			version: CONFIG_SCHEMA_VERSION,
 			providers: {},
 			settings: {},
 		});
+		assert.match(warnings.join("\n"), /Run \/newapi-config-recover/);
 		const backups = getBackupPaths(agentDir);
 		assert.equal(backups.length, 1);
 		assert.equal(readFileSync(backups[0], "utf-8"), malformed);
@@ -148,7 +158,7 @@ test("readConfig: archives JSON that does not match the NewAPIConfig schema", ()
 		});
 	}));
 
-test("readConfig: uses the version field and reports invalid schema 1 fields", () =>
+test("readConfig: accepts missing modelApiOverrides but reports other invalid schema 1 fields", () =>
 	withAgentDir((agentDir) => {
 		const path = getConfigPath();
 		mkdirSync(dirname(path), { recursive: true });
@@ -164,11 +174,25 @@ test("readConfig: uses the version field and reports invalid schema 1 fields", (
 		});
 		writeFileSync(path, raw);
 
+		assert.deepEqual(
+			deserializeConfig(
+				JSON.stringify({
+					version: CONFIG_SCHEMA_VERSION,
+					providers: { gw: { baseUrl: "https://gw.example.com" } },
+					settings: { onboardingWarnCountdown: 0 },
+				}),
+			),
+			{
+				version: CONFIG_SCHEMA_VERSION,
+				providers: { gw: { baseUrl: "https://gw.example.com" } },
+				settings: { onboardingWarnCountdown: 0 },
+			},
+		);
 		assert.deepEqual(getConfigVersion(), { path, schemaVersion: CONFIG_SCHEMA_VERSION });
 		assert.throws(
 			() => deserializeConfig(raw),
 			(error: unknown) => {
-				assert.match(String(error), /config\.providers\.gw\.modelApiOverrides is required/);
+				assert.doesNotMatch(String(error), /modelApiOverrides is required/);
 				assert.match(String(error), /config\.settings\.sendSessionAffinityHeaders is not allowed/);
 				return true;
 			},
@@ -233,7 +257,8 @@ test("readConfig: migrates schema 0 modelOverrides and preserves them in a backu
 			settings: { onboardingWarnCountdown: 2 },
 		});
 		assert.equal(warnings.length, 1);
-		assert.match(warnings[0], /schema 0 config.*schema 1.*models\.json/);
+		assert.match(warnings[0], /schema 0 config.*schema 1/);
+		assert.match(warnings[0], /Run \/newapi-config-recover/);
 		assert.doesNotMatch(warnings[0], /legacy modelOverrides found/);
 		const backups = getBackupPaths(agentDir);
 		assert.equal(backups.length, 1);
