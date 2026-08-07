@@ -1,14 +1,22 @@
 /** Verifies config normalization, atomic updates, path migration, and schema version handling. */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
-import { getConfigPath, readConfig, updateConfig } from "../src/config.ts";
+import { deserializeConfig, getConfigPath, readConfig, updateConfig } from "../src/config.ts";
 import { CONFIG_SCHEMA_VERSION } from "../src/constants.ts";
 import { getConfigVersion, getLegacyConfigPath } from "../src/migration.ts";
+
+function getBackupPaths(agentDir: string): string[] {
+	const configDir = join(agentDir, "extension-settings");
+	if (!existsSync(configDir)) return [];
+	return readdirSync(configDir)
+		.filter((name) => /^provider-newapi\.\d{6}-\d{6}\.json\.bak$/.test(name))
+		.map((name) => join(configDir, name));
+}
 
 function withAgentDir(run: (agentDir: string) => void | Promise<void>): Promise<void> | void {
 	const previous = process.env.PI_CODING_AGENT_DIR;
@@ -39,19 +47,17 @@ test("config paths separate settings from extension sources", () =>
 		});
 	}));
 
-test("readConfig: moves and reads the legacy extensions-directory config", () =>
-	withAgentDir(() => {
+test("readConfig: archives and migrates the legacy extensions-directory config", () =>
+	withAgentDir((agentDir) => {
 		const legacyPath = getLegacyConfigPath();
 		mkdirSync(dirname(legacyPath), { recursive: true });
-		writeFileSync(
-			legacyPath,
-			JSON.stringify({
-				providers: {
-					gw: { baseUrl: "https://gw.example.com", modelApiOverrides: {} },
-				},
-				settings: {},
-			}),
-		);
+		const raw = JSON.stringify({
+			providers: {
+				gw: { baseUrl: "https://gw.example.com", modelApiOverrides: {} },
+			},
+			settings: {},
+		});
+		writeFileSync(legacyPath, raw);
 
 		assert.deepEqual(getConfigVersion(), { path: legacyPath, schemaVersion: 0 });
 		assert.deepEqual(readConfig(), {
@@ -59,7 +65,7 @@ test("readConfig: moves and reads the legacy extensions-directory config", () =>
 			providers: {
 				gw: { baseUrl: "https://gw.example.com", modelApiOverrides: {} },
 			},
-			settings: { onboardingWarnCountdown: undefined },
+			settings: {},
 		});
 		assert.equal(existsSync(legacyPath), false);
 		assert.equal(existsSync(getConfigPath()), true);
@@ -67,7 +73,114 @@ test("readConfig: moves and reads the legacy extensions-directory config", () =>
 			path: getConfigPath(),
 			schemaVersion: CONFIG_SCHEMA_VERSION,
 		});
+		const backups = getBackupPaths(agentDir);
+		assert.equal(backups.length, 1);
+		assert.equal(readFileSync(backups[0], "utf-8"), raw);
 		assert.equal(JSON.parse(readFileSync(getConfigPath(), "utf-8")).version, CONFIG_SCHEMA_VERSION);
+	}));
+
+test("readConfig: archives a shadowed legacy-path file", () =>
+	withAgentDir((agentDir) => {
+		const path = getConfigPath();
+		const legacyPath = getLegacyConfigPath();
+		mkdirSync(dirname(path), { recursive: true });
+		mkdirSync(dirname(legacyPath), { recursive: true });
+		writeFileSync(
+			path,
+			JSON.stringify({ version: CONFIG_SCHEMA_VERSION, providers: {}, settings: {} }),
+		);
+		const legacyRaw = JSON.stringify({ providers: { old: { baseUrl: "https://old.example.com" } } });
+		writeFileSync(legacyPath, legacyRaw);
+
+		assert.deepEqual(readConfig().providers, {});
+		assert.equal(existsSync(legacyPath), false);
+		const backups = getBackupPaths(agentDir);
+		assert.equal(backups.length, 1);
+		assert.equal(readFileSync(backups[0], "utf-8"), legacyRaw);
+	}));
+
+test("readConfig: archives malformed JSON and creates an empty config", () =>
+	withAgentDir((agentDir) => {
+		const path = getConfigPath();
+		mkdirSync(dirname(path), { recursive: true });
+		const malformed = '{"providers":';
+		writeFileSync(path, malformed);
+
+		assert.deepEqual(readConfig(), {
+			version: CONFIG_SCHEMA_VERSION,
+			providers: {},
+			settings: {},
+		});
+		const backups = getBackupPaths(agentDir);
+		assert.equal(backups.length, 1);
+		assert.equal(readFileSync(backups[0], "utf-8"), malformed);
+		assert.deepEqual(JSON.parse(readFileSync(path, "utf-8")), {
+			version: CONFIG_SCHEMA_VERSION,
+			providers: {},
+			settings: {},
+		});
+	}));
+
+test("readConfig: archives JSON that does not match the NewAPIConfig schema", () =>
+	withAgentDir((agentDir) => {
+		const path = getConfigPath();
+		mkdirSync(dirname(path), { recursive: true });
+		const raw = JSON.stringify({
+			version: CONFIG_SCHEMA_VERSION,
+			providers: { gw: { baseUrl: 42, modelApiOverrides: {} } },
+			settings: {},
+		});
+		writeFileSync(path, raw);
+
+		assert.throws(() => deserializeConfig(raw), /config\.providers\.gw\.baseUrl must be string/);
+		assert.deepEqual(readConfig(), {
+			version: CONFIG_SCHEMA_VERSION,
+			providers: {},
+			settings: {},
+		});
+		const backups = getBackupPaths(agentDir);
+		assert.equal(backups.length, 1);
+		assert.equal(readFileSync(backups[0], "utf-8"), raw);
+		assert.deepEqual(JSON.parse(readFileSync(path, "utf-8")), {
+			version: CONFIG_SCHEMA_VERSION,
+			providers: {},
+			settings: {},
+		});
+	}));
+
+test("readConfig: uses the version field and reports invalid schema 1 fields", () =>
+	withAgentDir((agentDir) => {
+		const path = getConfigPath();
+		mkdirSync(dirname(path), { recursive: true });
+		const raw = JSON.stringify({
+			version: CONFIG_SCHEMA_VERSION,
+			providers: {
+				gw: { baseUrl: "https://gw.example.com" },
+			},
+			settings: {
+				onboardingWarnCountdown: 0,
+				sendSessionAffinityHeaders: true,
+			},
+		});
+		writeFileSync(path, raw);
+
+		assert.deepEqual(getConfigVersion(), { path, schemaVersion: CONFIG_SCHEMA_VERSION });
+		assert.throws(
+			() => deserializeConfig(raw),
+			(error: unknown) => {
+				assert.match(String(error), /config\.providers\.gw\.modelApiOverrides is required/);
+				assert.match(String(error), /config\.settings\.sendSessionAffinityHeaders is not allowed/);
+				return true;
+			},
+		);
+		assert.deepEqual(readConfig(), {
+			version: CONFIG_SCHEMA_VERSION,
+			providers: {},
+			settings: {},
+		});
+		const backups = getBackupPaths(agentDir);
+		assert.equal(backups.length, 1);
+		assert.equal(readFileSync(backups[0], "utf-8"), raw);
 	}));
 
 test("readConfig: rejects and preserves newer config schemas", () =>
@@ -81,29 +194,35 @@ test("readConfig: rejects and preserves newer config schemas", () =>
 		assert.equal(readFileSync(path, "utf-8"), raw);
 	}));
 
-test("readConfig: keeps only supported API overrides and current settings", () =>
-	withAgentDir(() => {
+test("readConfig: migrates schema 0 modelOverrides and preserves them in a backup", () =>
+	withAgentDir((agentDir) => {
 		const path = getConfigPath();
 		mkdirSync(dirname(path), { recursive: true });
-		writeFileSync(
-			path,
-			JSON.stringify({
-				version: CONFIG_SCHEMA_VERSION,
-				providers: {
-					gw: {
-						baseUrl: "https://gw.example.com",
-						modelOverrides: { old: { api: "anthropic-messages" } },
-						modelApiOverrides: {
-							"^claude-": "anthropic-messages",
-							"^bad-": "unsupported-api",
-						},
+		const raw = JSON.stringify({
+			providers: {
+				gw: {
+					baseUrl: "https://gw.example.com",
+					modelOverrides: { old: { api: "anthropic-messages" } },
+					modelApiOverrides: {
+						"^claude-": "anthropic-messages",
 					},
 				},
-				settings: { onboardingWarnCountdown: 2, sendSessionAffinityHeaders: true },
-			}),
-		);
+			},
+			settings: { onboardingWarnCountdown: 2, sendSessionAffinityHeaders: true },
+		});
+		writeFileSync(path, raw);
 
-		assert.deepEqual(readConfig(), {
+		assert.deepEqual(getConfigVersion(), { path, schemaVersion: 0 });
+		const warnings: string[] = [];
+		const originalWarn = console.warn;
+		console.warn = (...values: unknown[]) => warnings.push(values.map(String).join(" "));
+		let config: ReturnType<typeof readConfig>;
+		try {
+			config = readConfig();
+		} finally {
+			console.warn = originalWarn;
+		}
+		assert.deepEqual(config, {
 			version: CONFIG_SCHEMA_VERSION,
 			providers: {
 				gw: {
@@ -113,6 +232,16 @@ test("readConfig: keeps only supported API overrides and current settings", () =
 			},
 			settings: { onboardingWarnCountdown: 2 },
 		});
+		assert.equal(warnings.length, 1);
+		assert.match(warnings[0], /schema 0 config.*schema 1.*models\.json/);
+		assert.doesNotMatch(warnings[0], /legacy modelOverrides found/);
+		const backups = getBackupPaths(agentDir);
+		assert.equal(backups.length, 1);
+		assert.equal(readFileSync(backups[0], "utf-8"), raw);
+		const migrated = JSON.parse(readFileSync(path, "utf-8")) as {
+			providers: Record<string, Record<string, unknown>>;
+		};
+		assert.equal(Object.hasOwn(migrated.providers.gw, "modelOverrides"), false);
 	}));
 
 test("updateConfig: rewrites legacy fields out of extension config", async () => {
