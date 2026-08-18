@@ -7,6 +7,7 @@ import { RATIO_CONFIG_FETCH_TIMEOUT_MS } from "./constants.ts";
 import { fetchWithTimeout, NewAPIError } from "./http.ts";
 import { buildProviderModels, parseModelsResponse, parseRatioConfig } from "./models.ts";
 import { EMPTY_RATIOS } from "./types.ts";
+import { normalizeBaseUrl } from "./urls.ts";
 
 /** Refresh the provider catalog while retaining the last good cached result on failure. */
 export async function refreshProviderModels(
@@ -25,11 +26,12 @@ export async function refreshProviderModels(
 	const apiKey = credential?.type === "api_key" && credential.key ? credential.key : undefined;
 
 	try {
-		const baseUrl = entry.baseUrl.replace(/\/+$/, "");
+		const baseUrl = normalizeBaseUrl(entry.baseUrl);
 		// Ratio metadata improves cost reporting but is not required for model discovery.
 		let ratios = EMPTY_RATIOS;
 		try {
 			const ratioResponse = await fetchWithTimeout(`${baseUrl}/api/ratio_config`, {
+				redirect: "error",
 				signal: context.signal,
 				timeoutMs: RATIO_CONFIG_FETCH_TIMEOUT_MS,
 			});
@@ -45,6 +47,7 @@ export async function refreshProviderModels(
 		if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 		const modelsResponse = await fetchWithTimeout(`${baseUrl}/v1/models`, {
 			headers,
+			redirect: "error",
 			signal: context.signal,
 		});
 		if (modelsResponse.status === 401 || modelsResponse.status === 403) {

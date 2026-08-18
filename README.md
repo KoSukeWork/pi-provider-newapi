@@ -44,7 +44,7 @@ Base URL: https://ai.example.com
 Provider "my_gateway" added. Run /login my_gateway to enter its API key; Pi will then discover its models.
 ```
 
-The setup command performs a best-effort reachability check. A warning does not prevent the provider from being saved, since authenticated gateways often reject an anonymous probe.
+The setup command performs a best-effort reachability check. A warning does not prevent the provider from being saved, since authenticated gateways often reject an anonymous probe. The URL must be an absolute `http://` or `https://` URL without username/password information, query strings, fragments, or control characters. HTTPS is strongly recommended; HTTP is retained for explicitly local or self-hosted gateways and triggers a warning.
 
 Next, enter the API key through pi's standard login flow:
 
@@ -118,7 +118,7 @@ The add and remove commands manage `<agentDir>/extension-settings/provider-newap
 
 - **`version`** is the sole configuration schema discriminator. A missing value or `0` selects schema `0`; `1` selects the current schema. Schema validation never changes that selection. Invalid fields are reported by their full paths, while files declaring a newer schema are preserved and rejected until the extension is upgraded.
 - **`providers`** contains one entry per NewAPI gateway. Each key becomes the provider ID shown by pi.
-- **`baseUrl`** is the gateway root URL, without `/v1`. Trailing slashes are removed automatically.
+- **`baseUrl`** is the gateway root URL, without `/v1`. It must be an absolute `http://` or `https://` URL without username/password information, query strings, fragments, or control characters. Trailing slashes are removed automatically.
 - **`modelApiOverrides`** is optional; omitting it is equivalent to an empty object. When present, it maps JavaScript regular expressions to pi APIs. Rules are checked in JSON order, and the first match wins. Supported values are `anthropic-messages`, `openai-completions`, and `openai-responses`. Invalid regular expressions are ignored with a warning; unsupported API values fail schema validation and trigger the timestamped config backup described below.
 - **`settings.onboardingWarnCountdown`** is internal state that limits the no-provider reminder to three startups.
 

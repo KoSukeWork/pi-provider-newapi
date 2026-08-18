@@ -158,6 +158,26 @@ test("readConfig: archives JSON that does not match the NewAPIConfig schema", ()
 		});
 	}));
 
+test("readConfig: archives a base URL containing credentials", () =>
+	withAgentDir((agentDir) => {
+		const path = getConfigPath();
+		mkdirSync(dirname(path), { recursive: true });
+		const raw = JSON.stringify({
+			version: CONFIG_SCHEMA_VERSION,
+			providers: { gw: { baseUrl: "https://user:password@evil.example", modelApiOverrides: {} } },
+			settings: {},
+		});
+		writeFileSync(path, raw);
+
+		assert.throws(() => deserializeConfig(raw), /config\.providers\.gw\.baseUrl is invalid/);
+		assert.deepEqual(readConfig(), {
+			version: CONFIG_SCHEMA_VERSION,
+			providers: {},
+			settings: {},
+		});
+		assert.equal(getBackupPaths(agentDir).length, 1);
+	}));
+
 test("readConfig: accepts missing modelApiOverrides but reports other invalid schema 1 fields", () =>
 	withAgentDir((agentDir) => {
 		const path = getConfigPath();

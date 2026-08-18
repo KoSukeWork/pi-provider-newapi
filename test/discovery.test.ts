@@ -72,10 +72,12 @@ test("refreshProviderModels: persists fresh models through context.publish", asy
 	await withAgentDir(async () => {
 		const previousFetch = globalThis.fetch;
 		const requestedUrls: string[] = [];
+		const requestedOptions: RequestInit[] = [];
 		const publications: ModelsPublication[] = [];
-		globalThis.fetch = async (input) => {
+		globalThis.fetch = async (input, init) => {
 			const url = input instanceof Request ? input.url : String(input);
 			requestedUrls.push(url);
+			requestedOptions.push(init ?? {});
 			const payload = url.endsWith("/api/ratio_config")
 				? { success: true, data: {} }
 				: { data: [{ id: "fresh-model", supported_endpoint_types: ["openai"] }] };
@@ -100,6 +102,7 @@ test("refreshProviderModels: persists fresh models through context.publish", asy
 				"https://gw.example.com/api/ratio_config",
 				"https://gw.example.com/v1/models",
 			]);
+			assert.deepEqual(requestedOptions.map((options) => options.redirect), ["error", "error"]);
 			assert.equal(result.length, 1);
 			assert.equal(result[0].id, "fresh-model");
 			assert.equal(publications.length, 1);

@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning.
 
+## [0.5.1] - 2026-08-18
+
+### Security
+
+- Validate configured gateway URLs as absolute HTTP(S) URLs without credentials, query strings, fragments, or control characters; warn when HTTP is used.
+- Reject redirects during gateway reachability and authenticated model discovery so API keys cannot follow a redirected request.
+- Override the vulnerable development transitive dependency `brace-expansion` with `5.0.9` or newer.
+- Harden the configuration recovery prompt against instructions embedded in untrusted backup files and require confirmation before writing reconciled settings.
+
 ## [Unreleased]
 
 ### Breaking Changes

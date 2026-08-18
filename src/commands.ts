@@ -15,6 +15,7 @@ import { fetchWithTimeout } from "./http.ts";
 import { registerNewAPIProvider } from "./provider.ts";
 import type { ProviderRuntimeState } from "./provider.ts";
 import type { ProviderEntry } from "./types.ts";
+import { normalizeBaseUrl } from "./urls.ts";
 
 function terminalFileLink(path: string, enabled: boolean): string {
 	if (!enabled) return path;
@@ -55,15 +56,21 @@ export function registerCommands(pi: ExtensionAPI, state: ProviderRuntimeState):
 
 			const baseUrlRaw = await ctx.ui.input("Base URL", "https://ai.example.com");
 			if (baseUrlRaw === undefined) return;
-			const baseUrl = baseUrlRaw.trim().replace(/\/+$/, "");
-			if (!baseUrl) {
-				ctx.ui.notify("Base URL cannot be empty.", "error");
+			let baseUrl: string;
+			try {
+				baseUrl = normalizeBaseUrl(baseUrlRaw);
+			} catch (error) {
+				ctx.ui.notify(`Invalid base URL: ${error instanceof Error ? error.message : String(error)}`, "error");
 				return;
+			}
+			if (baseUrl.startsWith("http://")) {
+				ctx.ui.notify("Warning: HTTP does not encrypt API keys or model traffic; HTTPS is recommended.", "warning");
 			}
 
 			// Reachability is advisory: authenticated gateways may reject this probe, so setup still proceeds.
 			try {
 				const response = await fetchWithTimeout(`${baseUrl}/v1/models`, {
+					redirect: "error",
 					signal: ctx.signal,
 					timeoutMs: REACHABILITY_FETCH_TIMEOUT_MS,
 				});

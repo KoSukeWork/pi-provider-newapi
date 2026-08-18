@@ -5,15 +5,17 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { refreshProviderModels } from "./discovery.ts";
 import { DEFAULT_MODEL_API } from "./constants.ts";
 import type { NewAPIConfig, ProviderEntry } from "./types.ts";
+import { normalizeBaseUrl } from "./urls.ts";
 
 export interface ProviderRuntimeState {
 	registered: Set<string>;
 }
 
 export function registerNewAPIProvider(pi: ExtensionAPI, name: string, entry: ProviderEntry): void {
+	const baseUrl = normalizeBaseUrl(entry.baseUrl);
 	pi.registerProvider(name, {
 		name: `NewAPI (${name})`,
-		baseUrl: entry.baseUrl.replace(/\/+$/, ""),
+		baseUrl,
 		api: DEFAULT_MODEL_API,
 		// The empty startup catalog makes /login available before authenticated discovery runs.
 		models: [],
@@ -43,7 +45,14 @@ export function registerConfiguredProviders(
 			console.warn(`NewAPI: skipping provider "${name}" — missing baseUrl.`);
 			continue;
 		}
-		registerNewAPIProvider(pi, name, entry);
+		try {
+			registerNewAPIProvider(pi, name, entry);
+		} catch (error) {
+			console.warn(
+				`NewAPI: skipping provider "${name}" — invalid baseUrl (${error instanceof Error ? error.message : String(error)}).`,
+			);
+			continue;
+		}
 		state.registered.add(name);
 	}
 }

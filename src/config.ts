@@ -7,6 +7,7 @@ import { deserializeVersionedConfig } from "./config-schema.ts";
 import { CONFIG_FILENAME, CONFIG_SCHEMA_VERSION } from "./constants.ts";
 import { migrateConfig, resetInvalidConfig } from "./migration.ts";
 import type { NewAPIConfig } from "./types.ts";
+import { normalizeBaseUrl } from "./urls.ts";
 
 export function getConfigPath(): string {
 	return join(getAgentDir(), "extension-settings", CONFIG_FILENAME);
@@ -18,7 +19,18 @@ export function deserializeConfig(raw: string): NewAPIConfig {
 	if (parsed.kind !== "v1") {
 		throw new Error(`expected config schema v${CONFIG_SCHEMA_VERSION}, received schema v${parsed.schemaVersion}`);
 	}
-	return parsed.data;
+	const providers = Object.fromEntries(
+		Object.entries(parsed.data.providers).map(([name, entry]) => {
+			try {
+				return [name, { ...entry, baseUrl: normalizeBaseUrl(entry.baseUrl) }];
+			} catch (error) {
+				throw new Error(
+					`config.providers.${name}.baseUrl is invalid: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}),
+	);
+	return { ...parsed.data, providers };
 }
 
 export function readConfig(): NewAPIConfig {

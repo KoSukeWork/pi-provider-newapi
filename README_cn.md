@@ -44,7 +44,7 @@ Base URL: https://ai.example.com
 Provider "my_gateway" added. Run /login my_gateway to enter its API key; Pi will then discover its models.
 ```
 
-添加时会尝试检查网关是否可以访问。即使出现警告，配置仍会保存，因为需要认证的网关通常会拒绝匿名探测。
+添加时会尝试检查网关是否可以访问。即使出现警告，配置仍会保存，因为需要认证的网关通常会拒绝匿名探测。URL 必须是绝对的 `http://` 或 `https://` 地址，不能包含用户名/密码、查询字符串、片段或控制字符。强烈建议使用 HTTPS；为兼容明确的本地或自托管网关，HTTP 仍可使用但会显示警告。
 
 接下来，通过 pi 的标准登录流程录入 API Key：
 
@@ -118,7 +118,7 @@ Pi 尚未通过扩展 API 提供凭据删除能力。若要同时移除凭据和
 
 - **`version`** 是配置 schema 的唯一判定依据。缺少该字段或值为 `0` 时使用 schema `0`；值为 `1` 时使用当前 schema。Schema 校验不会改变这一判定。无效字段会按完整路径报告；声明了更高 schema 版本的文件会原样保留并拒绝加载，直到扩展完成升级。
 - **`providers`** 为每个 NewAPI 网关保存一个条目。键名就是 pi 中显示的 provider ID。
-- **`baseUrl`** 是不含 `/v1` 的网关根地址；末尾的斜杠会自动移除。
+- **`baseUrl`** 是不含 `/v1` 的网关根地址；必须是绝对的 `http://` 或 `https://` 地址，不能包含用户名/密码、查询字符串、片段或控制字符；末尾的斜杠会自动移除。
 - **`modelApiOverrides`** 为可选字段；省略它等同于使用空对象。存在时，它会将 JavaScript 正则表达式映射到 pi API。规则按 JSON 中的顺序匹配，首个命中项生效。可用值为 `anthropic-messages`、`openai-completions` 和 `openai-responses`。无效的正则会被忽略并输出警告；不支持的 API 值无法通过 schema 校验，并会触发下文所述的时间戳配置备份。
 - **`settings.onboardingWarnCountdown`** 是内部状态，用于将未配置 provider 的提醒限制为三次启动。
 
