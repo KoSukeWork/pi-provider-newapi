@@ -99,7 +99,7 @@ out
 
 # Nuxt.js build / generate output
 .nuxt
-dist
+dist/*
 
 # Gatsby files
 .cache/
@@ -167,3 +167,7 @@ dist
 .ionide
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,node,direnv,dotenv
+
+# Keep compiled extension entrypoints (git install has no build step)
+!dist/*.js
+!**/dist/*.js

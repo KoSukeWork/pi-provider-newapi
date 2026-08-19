@@ -1,11 +1,11 @@
 {
   "name": "pi-provider-newapi",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "author": {
     "name": "ttimasdf",
     "url": "https://github.com/ttimasdf/pi-provider-newapi"
   },
-  "description": "pi provider extension for self-hosted NewAPI AI gateway — dynamic model discovery with cost calculation from ratio_config",
+  "description": "pi provider extension for self-hosted NewAPI AI gateway \u2014 dynamic model discovery with cost calculation from ratio_config",
   "type": "module",
   "license": "MIT",
   "keywords": [
@@ -19,7 +19,7 @@
   },
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./dist/extension.js"
     ],
     "prompts": [
       "./prompts"
