@@ -11,7 +11,7 @@ Connect [pi](https://github.com/earendil-works/pi) to one or more self-hosted [N
 Each gateway becomes a separate, named provider in pi. The extension:
 
 - discovers available models dynamically from NewAPI;
-- enriches known models with pi's built-in capability and compatibility metadata;
+- enriches known models with pi's built-in capability and compatibility metadata, preferring first-party catalogs (including xAI) over aggregator aliases;
 - selects a compatible API from the gateway's advertised endpoints, with optional regex overrides;
 - calculates model costs from NewAPI's ratio configuration when it is available; and
 - keeps the last successful model catalog available for offline use or temporary gateway failures.

@@ -35,6 +35,7 @@ export const API_PREFERENCE: readonly NewAPIModelApi[] = [
 	"openai-completions",
 ];
 
+/** First-party catalogs first. Aggregators last: they use `vendor/model` IDs that strip to the same lookup key. */
 export const ENRICHMENT_PROVIDERS: readonly BuiltinProvider[] = [
 	"deepseek",
 	"zai",
@@ -44,5 +45,6 @@ export const ENRICHMENT_PROVIDERS: readonly BuiltinProvider[] = [
 	"moonshotai",
 	"xiaomi",
 	"openai",
+	"xai",
 	"vercel-ai-gateway",
 ];

@@ -30,4 +30,6 @@ export const EMPTY_RATIOS: Ratios = {
 export interface ModelLookupItem {
 	model: Model<Api>;
 	source: string;
+	/** True when the built-in catalog id is an aggregator alias such as `xai/grok-4.6`. */
+	prefixed: boolean;
 }

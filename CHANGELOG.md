@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning.
 
+## [0.5.3] - 2026-08-22
+
+### Fixed
+
+- Include `xai` in model-enrichment sources, ahead of aggregator catalogs.
+- Prefer unprefixed first-party model IDs over aggregator aliases such as `xai/grok-4.6`, so incomplete Vercel metadata cannot mark vision models as text-only.
+
 ## [0.5.1] - 2026-08-18
 
 ### Security

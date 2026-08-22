@@ -5,6 +5,7 @@ import { test } from "node:test";
 
 import { getModels } from "@earendil-works/pi-ai/compat";
 
+import { ENRICHMENT_PROVIDERS } from "../src/constants.ts";
 import {
 	buildProviderModels,
 	compileModelApiOverrides,
@@ -125,4 +126,28 @@ test("buildProviderModels: enriched metadata and compatibility are preserved", (
 		...base.compat,
 		supportsDeveloperRole: false,
 	});
+});
+
+test("ENRICHMENT_PROVIDERS: xai is listed before aggregator catalogs", () => {
+	const xai = ENRICHMENT_PROVIDERS.indexOf("xai");
+	const vercel = ENRICHMENT_PROVIDERS.indexOf("vercel-ai-gateway");
+
+	assert.ok(xai >= 0, "expected xai in ENRICHMENT_PROVIDERS");
+	assert.ok(vercel >= 0, "expected vercel-ai-gateway in ENRICHMENT_PROVIDERS");
+	assert.ok(xai < vercel, "first-party xai must win over vercel-ai-gateway aliases");
+});
+
+test("buildProviderModels: xai grok models keep first-party vision metadata", () => {
+	const xaiGrok = getModels("xai").find(
+		(model) => model.id.toLowerCase().includes("grok") && model.input.includes("image"),
+	);
+	assert.ok(xaiGrok, "expected a vision-capable built-in xai grok model");
+
+	const models = build([{ id: xaiGrok.id, supportedEndpointTypes: ["openai"] }]);
+
+	assert.deepEqual(models[0].input, xaiGrok.input);
+	assert.equal(models[0].name, xaiGrok.name);
+	assert.equal(models[0].reasoning, xaiGrok.reasoning);
+	assert.equal(models[0].contextWindow, xaiGrok.contextWindow);
+	assert.equal(models[0].maxTokens, xaiGrok.maxTokens);
 });

@@ -62,10 +62,12 @@ function getEnrichmentLookup(): Map<string, ModelLookupItem> {
 
 		for (const model of providerModels) {
 			if (!SUPPORTED_NEWAPI_MODEL_APIS.has(model.api as NewAPIModelApi)) continue;
-			const stripped = model.id.includes("/") ? model.id.slice(model.id.indexOf("/") + 1) : model.id;
+			const prefixed = model.id.includes("/");
+			const stripped = prefixed ? model.id.slice(model.id.indexOf("/") + 1) : model.id;
 			const normalizedId = stripped.replaceAll(".", "-").toLowerCase();
-			// Provider order is intentional: the first matching built-in model supplies metadata.
-			if (lookup.has(normalizedId)) continue;
+			const existing = lookup.get(normalizedId);
+			// First match wins, except unprefixed first-party IDs replace aggregator aliases.
+			if (existing && (prefixed || !existing.prefixed)) continue;
 
 			lookup.set(normalizedId, {
 				model: {
@@ -76,6 +78,7 @@ function getEnrichmentLookup(): Map<string, ModelLookupItem> {
 					} as Model<Api>["compat"],
 				},
 				source: provider,
+				prefixed,
 			});
 		}
 	}
